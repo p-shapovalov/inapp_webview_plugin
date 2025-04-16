@@ -21,12 +21,12 @@ class WebViewActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        webView = WebView(this)
-        setContentView(webView)
+        setContentView(R.layout.webview_activity)
+        webView = findViewById(R.id.webview)
 
-        val paymentUrl = intent.getStringExtra("url")
+        val url = intent.getStringExtra("url")
 
-        if (paymentUrl == null) {
+        if (url == null) {
             finish()
             return
         }
@@ -35,7 +35,6 @@ class WebViewActivity : AppCompatActivity() {
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true 
-        webView.settings.databaseEnabled = true  
         webView.settings.allowContentAccess = true
         webView.settings.allowFileAccess = true
         webView.webViewClient = object : WebViewClient() {
@@ -68,7 +67,7 @@ class WebViewActivity : AppCompatActivity() {
             }
         }
 
-        webView.loadUrl(paymentUrl)
+        webView.loadUrl(url)
     }
 
     override fun onDestroy() {

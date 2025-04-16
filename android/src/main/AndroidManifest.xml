@@ -5,9 +5,10 @@
         <!-- 👇 Declare the Payment WebView Activity -->
         <activity
             android:name=".WebViewActivity"
-            android:theme="@style/Theme.AppCompat.Light.NoActionBar"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:exported="false" />
-
     </application>
 
 </manifest>
