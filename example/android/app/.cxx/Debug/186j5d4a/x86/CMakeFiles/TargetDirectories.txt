@@ -1,0 +1,2 @@
+/Users/apple/Documents/opensource/browser_plugin/example/android/app/.cxx/Debug/186j5d4a/x86/CMakeFiles/edit_cache.dir
+/Users/apple/Documents/opensource/browser_plugin/example/android/app/.cxx/Debug/186j5d4a/x86/CMakeFiles/rebuild_cache.dir
