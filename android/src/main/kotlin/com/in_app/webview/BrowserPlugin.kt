@@ -72,8 +72,7 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
-        activityPluginBinding = binding
-        binding.addActivityResultListener(this)
+        activityPluginBinding =  binding
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
@@ -83,6 +82,7 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
+        activityPluginBinding =  binding
     }
 
     override fun onDetachedFromActivity() {
