@@ -1,8 +1,6 @@
 package com.in_app.webview
 
 import android.annotation.SuppressLint
-import android.app.ComponentCaller
-import android.content.Intent
 import android.os.Bundle
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -33,7 +31,7 @@ class WebViewActivity : AppCompatActivity() {
 
         setContentView(R.layout.webview_activity)
         webView = findViewById(R.id.webview)
-        webViewChromeClient = WebViewChromeClient(this, applicationContext)
+        webViewChromeClient = WebViewChromeClient()
 
         val url = intent.getStringExtra("url")
 
@@ -60,7 +58,7 @@ class WebViewActivity : AppCompatActivity() {
                 val newUrl = request?.url.toString()
 
                 if (checkUrl(newUrl)) {
-                    methodChannel.invokeMethod("onNavigationCancel", newUrl)
+                    methodChannel.invokeMethod("onUrlChanged", newUrl)
                     return true
                 }
 
@@ -69,16 +67,6 @@ class WebViewActivity : AppCompatActivity() {
         }
 
         webView.loadUrl(url)
-    }
-
-    override fun onActivityResult(
-        requestCode: Int,
-        resultCode: Int,
-        data: Intent?,
-        caller: ComponentCaller
-    ) {
-        if (intent == null) return
-        webViewChromeClient.resultHandler.handleResult(requestCode, resultCode, intent)
     }
 
     override fun onDestroy() {

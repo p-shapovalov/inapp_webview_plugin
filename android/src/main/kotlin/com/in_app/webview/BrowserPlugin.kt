@@ -9,21 +9,27 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 
 
 /** BrowserPlugin */
-class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
+class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener {
 
     companion object {
         lateinit var methodChannel: MethodChannel
+        var activityPluginBinding: ActivityPluginBinding? = null
     }
 
-    private var activity: Activity? = null
+    var activity: Activity? = null
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel =
             MethodChannel(flutterPluginBinding.binaryMessenger, "inapp_webview_channel")
         methodChannel.setMethodCallHandler(this)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        TODO("Not yet implemented")
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
@@ -66,10 +72,13 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
+        activityPluginBinding = binding
+        binding.addActivityResultListener(this)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
         activity = null
+        activityPluginBinding = null
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {

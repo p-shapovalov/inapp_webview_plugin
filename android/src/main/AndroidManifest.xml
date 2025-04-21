@@ -3,16 +3,17 @@
     package="com.in_app.webview">
 
     <application>
-         <provider
+    
+        <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
+            android:authorities="${applicationId}.flutter_inappwebview_android.fileprovider"
             android:exported="false"
-            android:grantUriPermissions="true"
-            tools:replace="android:authorities">
+            android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/filepaths" />
+                android:resource="@xml/provider_paths" />
         </provider>
+        
         <activity
             android:name=".WebViewActivity"
             android:theme="@style/Theme.AppCompat.NoActionBar"
