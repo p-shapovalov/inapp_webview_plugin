@@ -9,6 +9,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 
 
 /** BrowserPlugin */
@@ -16,9 +17,11 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     companion object {
         lateinit var methodChannel: MethodChannel
+        var activityPluginBinding: ActivityPluginBinding? = null
     }
 
-    private var activity: Activity? = null
+
+    var activity: Activity? = null
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel =
@@ -66,6 +69,7 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
+        activityPluginBinding =  binding
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
@@ -74,6 +78,7 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
+        activityPluginBinding =  binding
     }
 
     override fun onDetachedFromActivity() {
