@@ -2,7 +2,6 @@ package com.in_app.webview
 
 import android.app.Activity
 import android.content.Intent
-
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -10,6 +9,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+
 
 /** BrowserPlugin */
 class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
@@ -27,30 +27,36 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
-        if (call.method == "openWebView") {
-            val url = call.argument<String>("url")
+        when (call.method) {
+            "open" -> {
+                val url = call.argument<String>("url")
+                val invalidUrlRegex = call.argument<List<String>>("invalidUrlRegex")?.toTypedArray()
 
-            if (activity == null) {
-                result.error("NO_ACTIVITY", "Activity is null", null)
-                return
+                if (activity == null) {
+                    result.error("NO_ACTIVITY", "Activity is null", null)
+                    return
+                }
+
+                if (url == null) {
+                    result.error("invalid_arguments", "url is null", null)
+                    return
+                }
+
+                val intent = Intent(activity, WebViewActivity::class.java).apply {
+                    putExtra("url", url)
+                    putExtra("invalidUrlRegex", invalidUrlRegex)
+                }
+
+                activity?.startActivity(intent)
+                result.success(null)
             }
-
-            if (url == null) {
-                result.error("invalid_arguments", "url is null", null)
-                return
+            "close" -> {
+                activity?.finish()
+                result.success(null)
             }
-
-            val intent = Intent(activity, WebViewActivity::class.java).apply {
-                putExtra("url", url)
+            else -> {
+                result.notImplemented()
             }
-
-            activity?.startActivity(intent)
-            result.success(null)
-        } else if (call.method == "closeWebView") {
-            activity?.finish()
-            result.success(null)
-        } else {
-            result.notImplemented()
         }
     }
 

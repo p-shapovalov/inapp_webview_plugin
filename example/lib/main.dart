@@ -23,8 +23,7 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       home: Scaffold(
         floatingActionButton: FloatingActionButton(onPressed: () {
-          final browser = BrowserPlugin(url: "https://app.paidviewpoint.com");
-          browser.open();
+          BrowserPlugin.open("https://jonathanbcsouza.github.io/Advanced_WebView/");
         }),
         appBar: AppBar(
           title: const Text('Plugin example app'),

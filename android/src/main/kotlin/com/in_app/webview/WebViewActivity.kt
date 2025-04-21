@@ -1,21 +1,31 @@
 package com.in_app.webview
 
 import android.annotation.SuppressLint
-import android.content.ActivityNotFoundException
+import android.app.ComponentCaller
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import io.flutter.plugin.common.MethodChannel
+import java.util.regex.Pattern
+
 
 class WebViewActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    private lateinit var webViewChromeClient: WebViewChromeClient
     private lateinit var methodChannel: MethodChannel
+    private var invalidUrlPatternList: List<Pattern>? = null
+
+    private fun checkUrl(url: String): Boolean {
+        return invalidUrlPatternList?.let { it.any { p -> checkPattern(p, url) } } ?: false
+    }
+
+    private fun checkPattern(p: Pattern, url: String): Boolean {
+        return p.matcher(url).lookingAt()
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -23,8 +33,12 @@ class WebViewActivity : AppCompatActivity() {
 
         setContentView(R.layout.webview_activity)
         webView = findViewById(R.id.webview)
+        webViewChromeClient = WebViewChromeClient(this, applicationContext)
 
         val url = intent.getStringExtra("url")
+
+        invalidUrlPatternList =
+            intent.getStringArrayExtra("invalidUrlRegex")?.map { Pattern.compile(it) }
 
         if (url == null) {
             finish()
@@ -34,40 +48,37 @@ class WebViewActivity : AppCompatActivity() {
         methodChannel = BrowserPlugin.methodChannel
 
         webView.settings.javaScriptEnabled = true
-        webView.settings.domStorageEnabled = true 
+        webView.settings.domStorageEnabled = true
         webView.settings.allowContentAccess = true
         webView.settings.allowFileAccess = true
+        webView.webChromeClient = webViewChromeClient
         webView.webViewClient = object : WebViewClient() {
-
             override fun shouldOverrideUrlLoading(
                 view: WebView?,
                 request: WebResourceRequest?
             ): Boolean {
                 val newUrl = request?.url.toString()
 
-                if (isDeepLink(newUrl)) {
-                    try {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(newUrl))
-                        startActivity(intent)
-                    } catch (e: ActivityNotFoundException) {
-                        Toast.makeText(
-                            this@WebViewActivity,
-                            "No app found to open this link",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
+                if (checkUrl(newUrl)) {
+                    methodChannel.invokeMethod("onNavigationCancel", newUrl)
                     return true
                 }
 
-                return false 
-            }
-
-            override fun onPageFinished(view: WebView?, url: String?) {
-
+                return false
             }
         }
 
         webView.loadUrl(url)
+    }
+
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?,
+        caller: ComponentCaller
+    ) {
+        if (intent == null) return
+        webViewChromeClient.resultHandler.handleResult(requestCode, resultCode, intent)
     }
 
     override fun onDestroy() {
@@ -75,12 +86,4 @@ class WebViewActivity : AppCompatActivity() {
         methodChannel.invokeMethod("onFinish", null)
         finish()
     }
-
-
-    private fun isDeepLink(url: String): Boolean {
-        val allowedSchemes =
-            listOf("http", "https", "file", "chrome", "data", "javascript", "about")
-        return allowedSchemes.none { url.startsWith("$it://") }
-    }
-
 }

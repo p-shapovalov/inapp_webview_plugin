@@ -52,7 +52,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
 
         updateCloseButtonAppearance()
 
-        closeButton.addTarget(self, action: #selector(closeWebView), for: .touchUpInside)
+        closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(closeButton)
 
@@ -85,7 +85,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         closeButton.layer.cornerRadius = 14
         closeButton.layer.masksToBounds = true
         closeButton.contentEdgeInsets = UIEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
-           closeButton.imageEdgeInsets = UIEdgeInsets(top: 2, left: 2, bottom: 2, right: 2)
+        closeButton.imageEdgeInsets = UIEdgeInsets(top: 2, left: 2, bottom: 2, right: 2)
 
         closeButton.layer.shadowColor = UIColor.black.cgColor
         closeButton.layer.shadowOpacity = 0.3
@@ -127,7 +127,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         return !allowedSchemes.contains { url.hasPrefix("\($0)://") }
     }
 
-    @objc private func closeWebView() {
+    @objc private func close() {
         BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
         dismiss(animated: true, completion: nil)
     }

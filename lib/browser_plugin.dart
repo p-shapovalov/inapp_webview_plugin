@@ -1,17 +1,29 @@
 import 'package:flutter/services.dart';
 
 class BrowserPlugin {
-  static const MethodChannel _channel = MethodChannel('inapp_webview_channel');
+  static final MethodChannel _channel = MethodChannel('inapp_webview_channel')
+    ..setMethodCallHandler(_handleMessages);
 
-  final String url;
-
-  BrowserPlugin({required this.url});
-
-  Future<void> open() async {
-    await _channel.invokeMethod('openWebView', {'url': url});
+  static Future<void> open(String url, {List<String>? invalidUrlRegex}) async {
+    await _channel.invokeMethod('open', {
+      'url': url,
+      if (invalidUrlRegex != null) 'invalidUrlRegex': invalidUrlRegex
+    });
   }
 
-  Future<void> close() async {
-    await _channel.invokeMethod('closeWebView');
+  static Future close() => _channel.invokeMethod('close');
+
+  static VoidCallback? onFinish;
+  static Function(String)? onNavigationCancel;
+
+  static Future<Null> _handleMessages(MethodCall call) async {
+    switch (call.method) {
+      case 'onFinish':
+        onFinish?.call();
+        break;
+      case 'onNavigationCancel':
+        onNavigationCancel?.call(call.arguments.toString());
+        break;
+    }
   }
 }

@@ -15,7 +15,7 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        if call.method == "openWebView" {
+        if call.method == "open" {
             guard let args = call.arguments as? [String: Any],
                   let url = args["url"] as? String,
                   let rootViewController = UIApplication.shared.keyWindow?.rootViewController else {
@@ -32,7 +32,7 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
 
             result(nil)
 
-        } else if call.method == "closeWebView" {
+        } else if call.method == "close" {
             if let webViewController = BrowserPlugin.webViewController {
                 webViewController.dismiss(animated: true, completion: {
                     BrowserPlugin.webViewController = nil 
