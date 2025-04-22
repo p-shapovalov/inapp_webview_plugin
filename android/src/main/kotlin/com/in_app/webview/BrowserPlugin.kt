@@ -53,11 +53,11 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
                     putExtra("invalidUrlRegex", invalidUrlRegex)
                 }
 
-                activity?.startActivity(intent)
+                activity?.startActivityForResult(intent, 20)
                 result.success(null)
             }
             "close" -> {
-                activity?.finish()
+                activity?.finishActivity(20)
                 result.success(null)
             }
             else -> {

@@ -17,13 +17,11 @@ import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import io.flutter.plugin.common.MethodChannel
 import java.util.regex.Pattern
 
 
 class WebViewActivity : AppCompatActivity() {
     private lateinit var webView: WebView
-    private lateinit var methodChannel: MethodChannel
 
     private var pickerCallback: ValueCallback<Array<Uri>>? = null
 
@@ -34,7 +32,7 @@ class WebViewActivity : AppCompatActivity() {
     }
 
     private fun checkPattern(p: Pattern, url: String): Boolean {
-        return p.matcher(url).lookingAt()
+        return p.matcher(url).find()
     }
 
     override fun onActivityResult(
@@ -66,8 +64,6 @@ class WebViewActivity : AppCompatActivity() {
             finish()
             return
         }
-
-        methodChannel = BrowserPlugin.methodChannel
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
@@ -120,7 +116,7 @@ class WebViewActivity : AppCompatActivity() {
                 val newUrl = request?.url.toString()
 
                 if (checkUrl(newUrl)) {
-                    methodChannel.invokeMethod("onUrlChanged", newUrl)
+                    BrowserPlugin.methodChannel.invokeMethod("onNavigationCancel", newUrl)
                     return true
                 }
 
@@ -133,7 +129,7 @@ class WebViewActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        methodChannel.invokeMethod("onFinish", null)
+        BrowserPlugin.methodChannel.invokeMethod("onFinish", null)
         finish()
     }
 

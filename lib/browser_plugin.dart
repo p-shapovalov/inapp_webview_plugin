@@ -1,22 +1,41 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class BrowserPlugin {
-  static final MethodChannel _channel = MethodChannel('inapp_webview_channel')
-    ..setMethodCallHandler(_handleMessages);
+  static BrowserPlugin? _instance;
+  static const MethodChannel _channel = MethodChannel('inapp_webview_channel');
 
-  static Future<void> open(String url, {List<String>? invalidUrlRegex}) async {
+  BrowserPlugin._();
+
+  static BrowserPlugin get instance =>
+      (_instance != null) ? _instance! : _init();
+
+  static BrowserPlugin _init() {
+    _channel.setMethodCallHandler((call) async {
+      try {
+        return await _handleMethod(call);
+      } on Error catch (e, stackTrace) {
+        debugPrint(e.toString());
+        debugPrint(stackTrace.toString());
+      }
+    });
+    _instance = BrowserPlugin._();
+    return _instance!;
+  }
+
+  Future<void> open(String url, {List<String>? invalidUrlRegex}) async {
     await _channel.invokeMethod('open', {
       'url': url,
       if (invalidUrlRegex != null) 'invalidUrlRegex': invalidUrlRegex
     });
   }
 
-  static Future close() => _channel.invokeMethod('close');
+  Future close() => _channel.invokeMethod('close');
 
   static VoidCallback? onFinish;
   static Function(String)? onNavigationCancel;
 
-  static Future<Null> _handleMessages(MethodCall call) async {
+  static Future _handleMethod(MethodCall call) async {
     switch (call.method) {
       case 'onFinish':
         onFinish?.call();
