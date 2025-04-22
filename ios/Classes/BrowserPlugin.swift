@@ -18,6 +18,7 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
         if call.method == "open" {
             guard let args = call.arguments as? [String: Any],
                   let url = args["url"] as? String,
+                  let invalidUrlRegex = args["invalidUrlRegex"] as? Array<String>,
                   let rootViewController = UIApplication.shared.keyWindow?.rootViewController else {
                 result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing arguments", details: nil))
                 return
@@ -25,6 +26,7 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
 
             let webViewController = WebViewController()
             webViewController.url = url
+            webViewController.invalidUrlRegex = invalidUrlRegex.map { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
             webViewController.modalPresentationStyle = .overFullScreen
             rootViewController.present(webViewController, animated: true, completion: nil)
 

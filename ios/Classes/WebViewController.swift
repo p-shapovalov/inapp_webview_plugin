@@ -4,6 +4,7 @@ import Flutter
 
 class WebViewController: UIViewController, WKNavigationDelegate {
     var url: String = ""
+    var invalidUrlRegex: Array<NSRegularExpression?> = []
 
     private var closeButton = UIButton(type: .system)
 
@@ -109,24 +110,28 @@ class WebViewController: UIViewController, WKNavigationDelegate {
             return
         }
 
-        if isDeepLink(url) {
-            if let deepLinkUrl = URL(string: url) {
-                DispatchQueue.main.async {
-                    UIApplication.shared.open(deepLinkUrl, options: [:])
-                }
-            }
-            decisionHandler(.cancel) 
+        if checkUrl(url) {
+            BrowserPlugin.methodChannel?.invokeMethod("onNavigationCancel", arguments: url)
+            decisionHandler(.cancel)
             return
         }
 
         decisionHandler(.allow)
     }
-
-    private func isDeepLink(_ url: String) -> Bool {
-        let allowedSchemes = ["http", "https", "file", "chrome", "data", "javascript", "about"]
-        return !allowedSchemes.contains { url.hasPrefix("\($0)://") }
+    
+    private func checkUrl(_ url: String) -> Bool {
+        return invalidUrlRegex.contains { checkPattern($0, url) }
     }
+    
 
+    private func checkPattern(_ regex: NSRegularExpression?, _ url: String) -> Bool {
+            let match = regex?.firstMatch(
+                in: url,
+                options: [],
+                range: NSRange(location: 0, length: url.count))
+            return match != nil
+    }
+    
     @objc private func close() {
         BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
         dismiss(animated: true, completion: nil)
