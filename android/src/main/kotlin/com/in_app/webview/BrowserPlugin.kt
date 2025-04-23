@@ -2,6 +2,9 @@ package com.in_app.webview
 
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
+import com.google.androidbrowserhelper.trusted.LauncherActivity
+import com.umongous.paidviewpoint.isTwaSupported
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -16,16 +19,18 @@ import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
 class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener {
 
     companion object {
-        lateinit var methodChannel: MethodChannel
+        var methodChannel: MethodChannel? = null
         var activityPluginBinding: ActivityPluginBinding? = null
     }
 
-    var activity: Activity? = null
+    private var activity: Activity? = null
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        methodChannel =
-            MethodChannel(flutterPluginBinding.binaryMessenger, "inapp_webview_channel")
-        methodChannel.setMethodCallHandler(this)
+        if(methodChannel == null) {
+            methodChannel =
+                MethodChannel(flutterPluginBinding.binaryMessenger, "inapp_webview_channel")
+            methodChannel!!.setMethodCallHandler(this)
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -56,6 +61,19 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
                 activity?.startActivityForResult(intent, 20)
                 result.success(null)
             }
+            "openTWA" -> {
+                val intent = Intent(activity, LauncherActivity::class.java).apply {
+                    data = call.argument<String>("url")?.let { Uri.parse(it) }
+                }
+                activity?.startActivity(intent)
+            }
+            "isTWASupported" -> {
+                result.success(
+                    activity?.applicationContext?.packageManager?.let
+                    { isTwaSupported(it) }
+                        ?: false
+                )
+            }
             "close" -> {
                 activity?.finishActivity(20)
                 result.success(null)
@@ -67,7 +85,7 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        methodChannel.setMethodCallHandler(null)
+        methodChannel?.setMethodCallHandler(null)
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {

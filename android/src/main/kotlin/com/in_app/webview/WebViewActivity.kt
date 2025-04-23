@@ -116,7 +116,7 @@ class WebViewActivity : AppCompatActivity() {
                 val newUrl = request?.url.toString()
 
                 if (checkUrl(newUrl)) {
-                    BrowserPlugin.methodChannel.invokeMethod("onNavigationCancel", newUrl)
+                    BrowserPlugin.methodChannel?.invokeMethod("onNavigationCancel", newUrl)
                     return true
                 }
 
@@ -129,7 +129,7 @@ class WebViewActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        BrowserPlugin.methodChannel.invokeMethod("onFinish", null)
+        BrowserPlugin.methodChannel?.invokeMethod("onFinish", null)
         finish()
     }
 
