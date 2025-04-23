@@ -1,17 +1,19 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class BrowserPlugin {
   static BrowserPlugin? _instance;
-  static const MethodChannel _channel = MethodChannel('inapp_webview_channel');
+  final MethodChannel _channel;
 
-  BrowserPlugin._();
+  BrowserPlugin._(this._channel);
 
-  static BrowserPlugin get instance =>
-      (_instance != null) ? _instance! : _init();
+  static BrowserPlugin get instance => _instance ?? _init();
 
   static BrowserPlugin _init() {
-    _channel.setMethodCallHandler((call) async {
+    final channel = MethodChannel('inapp_webview_channel');
+    channel.setMethodCallHandler((call) async {
       try {
         return await _handleMethod(call);
       } on Error catch (e, stackTrace) {
@@ -19,16 +21,23 @@ class BrowserPlugin {
         debugPrint(stackTrace.toString());
       }
     });
-    _instance = BrowserPlugin._();
+    _instance = BrowserPlugin._(channel);
     return _instance!;
   }
 
-  Future<void> open(String url, {List<String>? invalidUrlRegex}) async {
-    await _channel.invokeMethod('open', {
-      'url': url,
-      if (invalidUrlRegex != null) 'invalidUrlRegex': invalidUrlRegex
-    });
-  }
+  Future open(String url, {List<String>? invalidUrlRegex}) =>
+      _channel.invokeMethod('open', {
+        'url': url,
+        if (invalidUrlRegex != null) 'invalidUrlRegex': invalidUrlRegex
+      });
+
+  Future openTWA(String url) async => {
+        if (Platform.isAndroid) _channel.invokeMethod('openTWA', {'url': url})
+      };
+
+  Future<bool> isTWASupported() async =>
+      Platform.isAndroid &&
+      (await _channel.invokeMethod<bool>('isTWASupported') ?? false);
 
   Future close() => _channel.invokeMethod('close');
 
