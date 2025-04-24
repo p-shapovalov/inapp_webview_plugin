@@ -40,10 +40,9 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
 
         } else if call.method == "close" {
             if let webViewController = BrowserPlugin.webViewController {
-                webViewController.dismiss(animated: true, completion: {
-                    BrowserPlugin.webViewController = nil 
-                    self.sendWebViewClosedEvent() 
-                })
+                webViewController.close()
+                BrowserPlugin.webViewController = nil
+                self.sendWebViewClosedEvent()
             }
             result(nil)
         } else {

@@ -146,9 +146,9 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         return match != nil
     }
     
-    @objc private func close() {
+     func close() {
         BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
-        dismiss(animated: true, completion: nil)
+        self.navigationController?.popViewController(animated: true)
     }
 }
 

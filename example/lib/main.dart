@@ -27,10 +27,11 @@ class _MyAppState extends State<MyApp> {
       ),
       home: Scaffold(
         floatingActionButton: FloatingActionButton(onPressed: () {
-          BrowserPlugin.instance.open(
-              "https://jonathanbcsouza.github.io/Advanced_WebView/",
-              invalidUrlRegex: [],
+          BrowserPlugin.instance.open("https://google.com",
+              invalidUrlRegex: ['paidviewpoint'],
               color: Theme.of(context).appBarTheme.backgroundColor);
+          BrowserPlugin.onNavigationCancel =
+              (url) => BrowserPlugin.instance.close();
         }),
         appBar: AppBar(
           title: const Text('Plugin example app'),
