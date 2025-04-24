@@ -10,7 +10,7 @@ import UIKit
     let flutterViewController = window?.rootViewController as! FlutterViewController
     GeneratedPluginRegistrant.register(with: self)
     let navigationController = UINavigationController(rootViewController: flutterViewController)
-    navigationController.isNavigationBarHidden = true
+    navigationController.navigationBar.isHidden = true
     window?.rootViewController = navigationController
     self.window.makeKeyAndVisible()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)

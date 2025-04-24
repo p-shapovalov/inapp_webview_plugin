@@ -1,11 +1,6 @@
 import UIKit
 import WebKit
 import Flutter
-extension WebViewController:UIGestureRecognizerDelegate {
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        return true
-    }
-}
 class WebViewController: UIViewController, WKNavigationDelegate {
     var url: String = ""
     var color: Int64?
@@ -40,8 +35,9 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     }
     
     override func viewDidLoad() {
-        self.navigationController?.interactivePopGestureRecognizer?.delegate = self
-        if(color != nil) { self.view.backgroundColor = uiColor(fromInt: color!)}
+        if (color != nil) {
+            self.view.backgroundColor = uiColor(fromInt: color!)
+        }
         super.viewDidLoad()
         setupUI()
         loadPage()
