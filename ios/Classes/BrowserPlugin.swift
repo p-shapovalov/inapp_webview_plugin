@@ -27,7 +27,7 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
             let webViewController = WebViewController()
             webViewController.url = url
             webViewController.invalidUrlRegex = invalidUrlRegex.map { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
-            webViewController.modalPresentationStyle = .overFullScreen
+            webViewController.modalPresentationStyle = .formSheet
             rootViewController.present(webViewController, animated: true, completion: nil)
 
             BrowserPlugin.webViewController = webViewController
