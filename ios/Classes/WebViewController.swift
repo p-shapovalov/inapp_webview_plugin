@@ -76,7 +76,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
                 webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
                 webView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
                 webView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-                webView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.bottomAnchor),
+                webView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
                 
                 //                closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
                 //                closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
