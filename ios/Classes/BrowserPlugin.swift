@@ -30,8 +30,6 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
             webViewController.url = url
             webViewController.color = color
             webViewController.invalidUrlRegex = invalidUrlRegex.map { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
-//            webViewController.modalPresentationStyle = .formSheet
-//            rootViewController.present(webViewController, animated: true, completion: nil)
             
             rootViewController.pushViewController(webViewController, animated: true)
             BrowserPlugin.webViewController = webViewController
@@ -42,16 +40,11 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
             if let webViewController = BrowserPlugin.webViewController {
                 webViewController.close()
                 BrowserPlugin.webViewController = nil
-                self.sendWebViewClosedEvent()
             }
             result(nil)
         } else {
             result(FlutterMethodNotImplemented)
         }
-    }
-
-    private func sendWebViewClosedEvent() {
-        BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
     }
 }
 

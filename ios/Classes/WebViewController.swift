@@ -5,11 +5,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     var url: String = ""
     var color: Int64?
     var invalidUrlRegex: Array<NSRegularExpression?> = []
-    
-    //    private var closeButton = UIButton(type: .system)
-    //
-    //    private var closeButtonTopConstraint: NSLayoutConstraint?
-    
+        
     private lazy var webView: WKWebView = {
         let webConfiguration = WKWebViewConfiguration()
         webConfiguration.preferences.javaScriptEnabled = true
@@ -42,30 +38,10 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         setupUI()
         loadPage()
     }
-    
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
         
-        //        let safeAreaTop = view.safeAreaInsets.top
-        //        closeButtonTopConstraint?.constant = safeAreaTop + 10
-    }
-    
     private func setupUI() {
         webView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(webView)
-        
-        //        closeButton = UIButton(type: .system)
-        //        if #available(iOS 13.0, *) {
-        //            closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
-        //        } else {
-        //            closeButton.setTitle("X", for: .normal)
-        //        }
-        
-        //        updateCloseButtonAppearance()
-        
-        //        closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
-        //        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        //        view.addSubview(closeButton)
         
         if #available(iOS 15.0, *) {
             NSLayoutConstraint.activate([
@@ -73,11 +49,6 @@ class WebViewController: UIViewController, WKNavigationDelegate {
                 webView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
                 webView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
                 webView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
-                
-                //                closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-                //                closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-                //                closeButton.widthAnchor.constraint(equalToConstant: 28),
-                //                closeButton.heightAnchor.constraint(equalToConstant: 28)
             ])
         } else {
             NSLayoutConstraint.activate([
@@ -88,21 +59,6 @@ class WebViewController: UIViewController, WKNavigationDelegate {
             ])
         }
     }
-    
-    //    private func updateCloseButtonAppearance() {
-    //        let isDarkMode = traitCollection.userInterfaceStyle == .dark
-    //        closeButton.tintColor = isDarkMode ? .white : .black
-    //        closeButton.backgroundColor = isDarkMode ? .black : .white
-    //        closeButton.layer.cornerRadius = 14
-    //        closeButton.layer.masksToBounds = true
-    //        closeButton.contentEdgeInsets = UIEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
-    //        closeButton.imageEdgeInsets = UIEdgeInsets(top: 2, left: 2, bottom: 2, right: 2)
-    //
-    //        closeButton.layer.shadowColor = UIColor.black.cgColor
-    //        closeButton.layer.shadowOpacity = 0.3
-    //        closeButton.layer.shadowOffset = CGSize(width: 0, height: 2)
-    //        closeButton.layer.shadowRadius = 3
-    //    }
     
     private func loadPage() {
         guard let url = URL(string: url) else {
