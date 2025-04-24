@@ -19,17 +19,21 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
             guard let args = call.arguments as? [String: Any],
                   let url = args["url"] as? String,
                   let invalidUrlRegex = args["invalidUrlRegex"] as? Array<String>,
-                  let rootViewController = UIApplication.shared.keyWindow?.rootViewController else {
+                  let rootViewController = UIApplication.shared.keyWindow?.rootViewController as? UINavigationController else {
                 result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing arguments", details: nil))
                 return
             }
-
+            
+            let color = args["color"] as? Int64
+                
             let webViewController = WebViewController()
             webViewController.url = url
+            webViewController.color = color
             webViewController.invalidUrlRegex = invalidUrlRegex.map { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
-            webViewController.modalPresentationStyle = .formSheet
-            rootViewController.present(webViewController, animated: true, completion: nil)
-
+//            webViewController.modalPresentationStyle = .formSheet
+//            rootViewController.present(webViewController, animated: true, completion: nil)
+            
+            rootViewController.pushViewController(webViewController, animated: true)
             BrowserPlugin.webViewController = webViewController
 
             result(nil)

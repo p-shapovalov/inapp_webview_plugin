@@ -25,10 +25,11 @@ class BrowserPlugin {
     return _instance!;
   }
 
-  Future open(String url, {List<String>? invalidUrlRegex}) =>
+  Future open(String url, {List<String>? invalidUrlRegex, Color? color}) =>
       _channel.invokeMethod('open', {
         'url': url,
-        if (invalidUrlRegex != null) 'invalidUrlRegex': invalidUrlRegex
+        if (invalidUrlRegex != null) 'invalidUrlRegex': invalidUrlRegex,
+        if (color != null) 'color': color.toARGB32()
       });
 
   Future openTWA(String url) async => {

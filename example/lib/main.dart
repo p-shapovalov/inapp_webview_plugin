@@ -21,10 +21,16 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        // appBarTheme: AppBarTheme(backgroundColor: Colors.deepOrange)
+      ),
       home: Scaffold(
         floatingActionButton: FloatingActionButton(onPressed: () {
-          BrowserPlugin.instance
-              .open("https://jonathanbcsouza.github.io/Advanced_WebView/");
+          BrowserPlugin.instance.open(
+              "https://jonathanbcsouza.github.io/Advanced_WebView/",
+              invalidUrlRegex: [],
+              color: Theme.of(context).appBarTheme.backgroundColor);
         }),
         appBar: AppBar(
           title: const Text('Plugin example app'),

@@ -7,7 +7,12 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    let flutterViewController = window?.rootViewController as! FlutterViewController
     GeneratedPluginRegistrant.register(with: self)
+    let navigationController = UINavigationController(rootViewController: flutterViewController)
+    navigationController.isNavigationBarHidden = true
+    window?.rootViewController = navigationController
+    self.window.makeKeyAndVisible()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 }
