@@ -42,6 +42,8 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
             "open" -> {
                 val url = call.argument<String>("url")
                 val invalidUrlRegex = call.argument<List<String>>("invalidUrlRegex")?.toTypedArray()
+                val headers = call.argument<HashMap<String, String>>("headers")
+                val color = call.argument<Long>("color")
 
                 if (activity == null) {
                     result.error("NO_ACTIVITY", "Activity is null", null)
@@ -55,7 +57,9 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
 
                 val intent = Intent(activity, WebViewActivity::class.java).apply {
                     putExtra("url", url)
+                    putExtra("color", color)
                     putExtra("invalidUrlRegex", invalidUrlRegex)
+                    putExtra("headers", headers)
                 }
 
                 activity?.startActivityForResult(intent, 20)

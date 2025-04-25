@@ -5,8 +5,9 @@ import android.app.ComponentCaller
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
+import android.opengl.Visibility
 import android.os.Bundle
+import android.view.View
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -14,6 +15,8 @@ import android.webkit.WebChromeClient.FileChooserParams
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.widget.ProgressBar
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -54,8 +57,15 @@ class WebViewActivity : AppCompatActivity() {
 
         setContentView(R.layout.webview_activity)
         webView = findViewById(R.id.webview)
+        val layout = findViewById<FrameLayout>(R.id.relativeLayout)
+        val progressBar = findViewById<ProgressBar>(R.id.progressBar)
+        val extras = intent.extras ?: return
+        val url = extras.getString("url")
+        @Suppress("DEPRECATION") val headers = intent.getSerializableExtra("headers") as HashMap<String,String>?
 
-        val url = intent.getStringExtra("url")
+        val color = extras.getLong("color")
+        webView.setBackgroundColor(color.toInt())
+        layout.setBackgroundColor(color.toInt())
 
         invalidUrlPatternList =
             intent.getStringArrayExtra("invalidUrlRegex")?.map { Pattern.compile(it) }
@@ -83,6 +93,12 @@ class WebViewActivity : AppCompatActivity() {
                 }
 
                 return false
+            }
+
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                super.onProgressChanged(view, newProgress)
+
+                if(newProgress == 100) progressBar.visibility = View.INVISIBLE
             }
 
             override fun onPermissionRequest(request: PermissionRequest) {
@@ -123,8 +139,7 @@ class WebViewActivity : AppCompatActivity() {
                 return false
             }
         }
-
-        webView.loadUrl(url)
+        if(headers != null) webView.loadUrl(url, headers) else webView.loadUrl(url)
     }
 
     override fun onDestroy() {

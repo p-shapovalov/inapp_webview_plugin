@@ -25,9 +25,10 @@ class BrowserPlugin {
     return _instance!;
   }
 
-  Future open(String url, {List<String>? invalidUrlRegex, Color? color}) =>
+  Future open(String url, {List<String>? invalidUrlRegex, Map<String, String>? headers, Color? color}) =>
       _channel.invokeMethod('open', {
         'url': url,
+        if (headers != null) 'invalidUrlRegex': headers,
         if (invalidUrlRegex != null) 'invalidUrlRegex': invalidUrlRegex,
         if (color != null) 'color': color.toARGB32()
       });
