@@ -5,7 +5,21 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     var url: String = ""
     var color: Int64?
     var invalidUrlRegex: Array<NSRegularExpression?> = []
-        
+    
+    
+    var progressBar = UIProgressView(progressViewStyle: .bar)
+    var progressBarTimer: Timer!
+    func startIndefiniteProgress() {
+        progressBarTimer = Timer.scheduledTimer(timeInterval: 0.03, target: self, selector: #selector(updateProgressView), userInfo: nil, repeats: true)
+    }
+    
+    @objc func updateProgressView() {
+        progressBar.progress += 0.01
+        if progressBar.progress >= 1.0 {
+            progressBar.progress = 0.0
+        }
+    }
+    
     private lazy var webView: WKWebView = {
         let webConfiguration = WKWebViewConfiguration()
         webConfiguration.preferences.javaScriptEnabled = true
@@ -32,16 +46,27 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     
     override func viewDidLoad() {
         if (color != nil) {
-            self.view.backgroundColor = uiColor(fromInt: color!)
+            let c =  uiColor(fromInt: color!)
+            self.view.backgroundColor = c
+            self.webView.backgroundColor = c
+            self.webView.scrollView.backgroundColor = c
         }
+        startIndefiniteProgress()
         super.viewDidLoad()
         setupUI()
         loadPage()
     }
-        
+    
     private func setupUI() {
         webView.translatesAutoresizingMaskIntoConstraints = false
+        progressBar.translatesAutoresizingMaskIntoConstraints = false
+        
+        view.insertSubview(progressBar, aboveSubview: webView)
         view.addSubview(webView)
+        
+        progressBar.topAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.topAnchor, constant: 0.0).isActive = true
+        progressBar.leadingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.leadingAnchor, constant: 0.0).isActive = true
+        progressBar.trailingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.trailingAnchor, constant: 0.0).isActive = true
         
         if #available(iOS 15.0, *) {
             NSLayoutConstraint.activate([
@@ -65,7 +90,17 @@ class WebViewController: UIViewController, WKNavigationDelegate {
             return
         }
         let request = URLRequest(url: url)
+        webView.isHidden = true
         webView.load(request)
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webView.isHidden = false
+        progressBar.isHidden = true
+    }
+    
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        webView.isHidden = false
+        progressBar.isHidden = true
     }
     
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -98,7 +133,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         return match != nil
     }
     
-     func close() {
+    func close() {
         BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
         self.navigationController?.popViewController(animated: true)
     }

@@ -30,7 +30,7 @@ class _MyAppState extends State<MyApp> {
           BrowserPlugin.instance.open(
               "https://jonathanbcsouza.github.io/Advanced_WebView/",
               invalidUrlRegex: ['paidviewpoint'],
-              color: Theme.of(context).appBarTheme.backgroundColor);
+              color: Colors.blue);
           BrowserPlugin.onNavigationCancel =
               (url) => BrowserPlugin.instance.close();
         }),
