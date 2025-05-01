@@ -25,10 +25,12 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
             }
             
             let color = args["color"] as? Int64
+            let headers = args["headers"] as? [String:String]
                 
             let webViewController = WebViewController()
             webViewController.url = url
             webViewController.color = color
+            webViewController.headers = headers
             webViewController.invalidUrlRegex = invalidUrlRegex.map { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
             
             rootViewController.pushViewController(webViewController, animated: true)
