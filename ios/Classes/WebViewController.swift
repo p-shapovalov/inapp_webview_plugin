@@ -4,6 +4,7 @@ import Flutter
 class WebViewController: UIViewController, WKNavigationDelegate {
     var url: String = ""
     var color: Int64?
+    var headers: [String:String]?
     var invalidUrlRegex: Array<NSRegularExpression?> = []
     
     
@@ -31,7 +32,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         webView.navigationDelegate = self
         webView.isUserInteractionEnabled = true
         webView.allowsLinkPreview = false
-        webView.allowsBackForwardNavigationGestures = true
+       webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.showsHorizontalScrollIndicator = false
         webView.scrollView.showsVerticalScrollIndicator = false
         return webView
@@ -68,29 +69,39 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         progressBar.leadingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.leadingAnchor, constant: 0.0).isActive = true
         progressBar.trailingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.trailingAnchor, constant: 0.0).isActive = true
         
-        if #available(iOS 15.0, *) {
-            NSLayoutConstraint.activate([
-                webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-                webView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-                webView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-                webView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
-            ])
-        } else {
             NSLayoutConstraint.activate([
                 webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
                 webView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
                 webView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
                 webView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
             ])
+    }
+    
+    @objc func keyboardWillShow(notification: NSNotification) {
+        if let keyboardHeight = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue.height {
+            self.webView.scrollView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 0 - keyboardHeight, right: 0)
         }
+    }
+    
+    @objc func keyboardWillHideß(notification: NSNotification) {
+        UIView.animate(withDuration: 0.2, animations: {
+            self.webView.scrollView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        })
     }
     
     private func loadPage() {
         guard let url = URL(string: url) else {
             return
         }
-        let request = URLRequest(url: url)
+        var request = URLRequest(url: url)
         webView.isHidden = true
+        
+        if(headers != nil) {
+            for (key, value) in headers! {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+        
         webView.load(request)
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
