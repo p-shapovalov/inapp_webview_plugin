@@ -3,8 +3,7 @@ package com.in_app.webview
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import com.google.androidbrowserhelper.trusted.LauncherActivity
-import com.umongous.paidviewpoint.isTwaSupported
+import com.in_app.webview.LauncherActivity
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
