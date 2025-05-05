@@ -5,7 +5,6 @@ import android.app.ComponentCaller
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.opengl.Visibility
 import android.os.Bundle
 import android.view.View
 import android.webkit.PermissionRequest
@@ -21,6 +20,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import java.util.regex.Pattern
+import androidx.core.net.toUri
 
 
 class WebViewActivity : AppCompatActivity() {
@@ -61,7 +61,7 @@ class WebViewActivity : AppCompatActivity() {
         val progressBar = findViewById<ProgressBar>(R.id.progressBar)
         val extras = intent.extras ?: return
         val url = extras.getString("url")
-        @Suppress("DEPRECATION") val headers = intent.getSerializableExtra("headers") as HashMap<String,String>?
+        val headers = intent.getSerializableExtra("headers") as HashMap<String,String>?
 
         val color = extras.getLong("color")
         webView.setBackgroundColor(color.toInt())
@@ -131,7 +131,11 @@ class WebViewActivity : AppCompatActivity() {
             ): Boolean {
                 val newUrl = request?.url.toString()
 
-                if (checkUrl(newUrl)) {
+                if (newUrl.startsWith("mailto:")) {
+                    startActivity(Intent(Intent.ACTION_VIEW, newUrl.toUri()))
+                    return true
+                }
+                else if (checkUrl(newUrl)) {
                     BrowserPlugin.methodChannel?.invokeMethod("onNavigationCancel", newUrl)
                     return true
                 }
