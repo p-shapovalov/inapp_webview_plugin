@@ -117,24 +117,19 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard
-            let url = navigationAction.request.url,
-            let scheme = url.scheme else {
-                decisionHandler(.cancel)
-                return
-            let urlStr = navigationAction.request.url?.absoluteString else {
-                decisionHandler(.allow)
-                return
-            }
+            let url = navigationAction.request.url  else {
+            decisionHandler(.allow)
+            return
         }
-
-        if (scheme.lowercased() == "mailto") {
+        
+        if (url.scheme?.lowercased() == "mailto") {
             UIApplication.shared.open(url, options: [:], completionHandler: nil)
             decisionHandler(.cancel)
             return
         }
         
-        if checkUrl(urlStr) {
-            BrowserPlugin.methodChannel?.invokeMethod("onNavigationCancel", arguments: urlStr)
+        if checkUrl(url.absoluteString) {
+            BrowserPlugin.methodChannel?.invokeMethod("onNavigationCancel", arguments: url.absoluteString)
             decisionHandler(.cancel)
             return
         }
