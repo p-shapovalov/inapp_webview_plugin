@@ -30,7 +30,7 @@ class BrowserPlugin {
         'url': url,
         if (headers != null) 'invalidUrlRegex': headers,
         if (invalidUrlRegex != null) 'invalidUrlRegex': invalidUrlRegex,
-        if (color != null) 'color': color.toARGB32()
+        if (color != null) 'color': color.value
       });
 
   Future openTWA(String url) async => {
