@@ -25,11 +25,11 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
     private var activity: Activity? = null
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-        if(methodChannel == null) {
+//        if(methodChannel == null) {
             methodChannel =
                 MethodChannel(flutterPluginBinding.binaryMessenger, "inapp_webview_channel")
             methodChannel!!.setMethodCallHandler(this)
-        }
+//        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
