@@ -5,8 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import com.in_app.webview.LauncherActivity
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
@@ -20,16 +22,15 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
     companion object {
         var methodChannel: MethodChannel? = null
         var activityPluginBinding: ActivityPluginBinding? = null
+        private var flutterPluginBinding: FlutterPluginBinding? = null
     }
 
     private var activity: Activity? = null
 
-    override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-//        if(methodChannel == null) {
-            methodChannel =
-                MethodChannel(flutterPluginBinding.binaryMessenger, "inapp_webview_channel")
-            methodChannel!!.setMethodCallHandler(this)
-//        }
+    override fun onAttachedToEngine(flutterPluginBinding: FlutterPluginBinding) {
+        if(methodChannel == null) {
+            initPlugin(flutterPluginBinding.binaryMessenger)
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -95,6 +96,10 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
         activityPluginBinding =  binding
+        flutterPluginBinding?.binaryMessenger?.let {
+            // Reinitialize MethodChannel Forcefully from MainIsolate
+            initPlugin(it)
+        }
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
@@ -109,5 +114,10 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
 
     override fun onDetachedFromActivity() {
         activity = null
+    }
+
+    private fun initPlugin(binaryMessenger: BinaryMessenger) {
+        methodChannel = MethodChannel(binaryMessenger, "inapp_webview_channel")
+        methodChannel?.setMethodCallHandler(this)
     }
 }
