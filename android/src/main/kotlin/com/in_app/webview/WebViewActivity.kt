@@ -136,7 +136,7 @@ class WebViewActivity : AppCompatActivity() {
                     return true
                 }
                 else if (checkUrl(newUrl)) {
-                    BrowserPlugin.methodChannel?.invokeMethod("onNavigationCancel", newUrl)
+                    BrowserPlugin.onNavigationCancel(newUrl)
                     return true
                 }
 
@@ -148,7 +148,7 @@ class WebViewActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        BrowserPlugin.methodChannel?.invokeMethod("onFinish", null)
+        BrowserPlugin.onFinish()
         finish()
     }
 

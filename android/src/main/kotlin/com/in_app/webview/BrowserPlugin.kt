@@ -3,7 +3,6 @@ package com.in_app.webview
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import com.in_app.webview.LauncherActivity
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -14,23 +13,40 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
+import io.flutter.plugin.common.StandardMethodCodec
 
 
 /** BrowserPlugin */
 class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener {
 
     companion object {
+        const val CHANNEL = "inapp_webview_channel"
         var methodChannel: MethodChannel? = null
         var activityPluginBinding: ActivityPluginBinding? = null
-        private var flutterPluginBinding: FlutterPluginBinding? = null
+        var messenger: BinaryMessenger? = null
+
+        private fun send(method: String, arguments: Any?) {
+            messenger!!.send(
+                CHANNEL,
+                StandardMethodCodec.INSTANCE.encodeMethodCall(MethodCall(method, arguments))
+            )
+        }
+
+        fun onNavigationCancel(url: String) {
+            send("onNavigationCancel", url)
+        }
+
+        fun onFinish() {
+           send("onFinish", null)
+        }
     }
 
     private var activity: Activity? = null
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPluginBinding) {
-        if(methodChannel == null) {
-            initPlugin(flutterPluginBinding.binaryMessenger)
-        }
+        if (messenger == null) messenger = flutterPluginBinding.binaryMessenger
+        methodChannel = MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL)
+        methodChannel!!.setMethodCallHandler(this)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -88,18 +104,15 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
         }
     }
 
-    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+    override fun onDetachedFromEngine(binding: FlutterPluginBinding) {
         methodChannel?.setMethodCallHandler(null)
         methodChannel = null
+        messenger = null
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
         activityPluginBinding =  binding
-        flutterPluginBinding?.binaryMessenger?.let {
-            // Reinitialize MethodChannel Forcefully from MainIsolate
-            initPlugin(it)
-        }
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
@@ -114,10 +127,5 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
 
     override fun onDetachedFromActivity() {
         activity = null
-    }
-
-    private fun initPlugin(binaryMessenger: BinaryMessenger) {
-        methodChannel = MethodChannel(binaryMessenger, "inapp_webview_channel")
-        methodChannel?.setMethodCallHandler(this)
     }
 }
