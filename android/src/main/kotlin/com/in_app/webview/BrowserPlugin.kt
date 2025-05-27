@@ -107,7 +107,6 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
     override fun onDetachedFromEngine(binding: FlutterPluginBinding) {
         methodChannel?.setMethodCallHandler(null)
         methodChannel = null
-        messenger = null
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
