@@ -26,7 +26,7 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
         var messenger: BinaryMessenger? = null
 
         private fun send(method: String, arguments: Any?) {
-            messenger!!.send(
+            messenger?.send(
                 CHANNEL,
                 StandardMethodCodec.INSTANCE.encodeMethodCall(MethodCall(method, arguments))
             )
