@@ -1,7 +1,6 @@
 package com.in_app.webview
 
 import android.annotation.SuppressLint
-import android.app.ComponentCaller
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -10,12 +9,13 @@ import android.view.View
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
-import android.webkit.WebChromeClient.FileChooserParams
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ProgressBar
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -27,7 +27,7 @@ class WebViewActivity : AppCompatActivity() {
     private lateinit var webView: WebView
 
     private var pickerCallback: ValueCallback<Array<Uri>>? = null
-
+    private var resultLauncher: ActivityResultLauncher<Intent>? = null
     private var invalidUrlPatternList: List<Pattern>? = null
 
     private fun checkUrl(url: String): Boolean {
@@ -38,22 +38,18 @@ class WebViewActivity : AppCompatActivity() {
         return p.matcher(url).find()
     }
 
-    override fun onActivityResult(
-        requestCode: Int,
-        resultCode: Int,
-        data: Intent?,
-        caller: ComponentCaller
-    ) {
-        if (pickerCallback != null && requestCode == PICKER) {
-            val result = FileChooserParams.parseResult(resultCode, data)
-            pickerCallback!!.onReceiveValue(result)
-            pickerCallback = null
-        }
-    }
-
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+
+        resultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (pickerCallback != null) {
+                val result = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+                pickerCallback!!.onReceiveValue(result)
+                pickerCallback = null
+            }
+        }
 
         setContentView(R.layout.webview_activity)
         webView = findViewById(R.id.webview)
@@ -85,10 +81,13 @@ class WebViewActivity : AppCompatActivity() {
                 filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
             ): Boolean {
+                pickerCallback?.onReceiveValue(null)
+                pickerCallback = filePathCallback
+
                 val intent = fileChooserParams?.createIntent()
-                if (intent != null) {
+                if (intent != null && resultLauncher != null) {
                     pickerCallback = filePathCallback
-                    startActivityForResult(intent, PICKER)
+                    resultLauncher!!.launch(intent)
                     return true
                 }
 
