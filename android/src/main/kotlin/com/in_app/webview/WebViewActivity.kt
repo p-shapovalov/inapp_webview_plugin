@@ -19,8 +19,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import java.util.regex.Pattern
 import androidx.core.net.toUri
+import java.util.regex.Pattern
 
 
 class WebViewActivity : AppCompatActivity() {
@@ -43,13 +43,17 @@ class WebViewActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
 
-        resultLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (pickerCallback != null) {
-                val result = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
-                pickerCallback!!.onReceiveValue(result)
-                pickerCallback = null
+        resultLauncher =
+            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                if (pickerCallback != null) {
+                    val result = WebChromeClient.FileChooserParams.parseResult(
+                        result.resultCode,
+                        result.data
+                    )
+                    pickerCallback!!.onReceiveValue(result)
+                    pickerCallback = null
+                }
             }
-        }
 
         setContentView(R.layout.webview_activity)
         webView = findViewById(R.id.webview)
@@ -57,7 +61,7 @@ class WebViewActivity : AppCompatActivity() {
         val progressBar = findViewById<ProgressBar>(R.id.progressBar)
         val extras = intent.extras ?: return
         val url = extras.getString("url")
-        val headers = intent.getSerializableExtra("headers") as HashMap<String,String>?
+        val headers = intent.getSerializableExtra("headers") as HashMap<String, String>?
 
         val color = extras.getLong("color")
         webView.setBackgroundColor(color.toInt())
@@ -75,7 +79,7 @@ class WebViewActivity : AppCompatActivity() {
         webView.settings.domStorageEnabled = true
         webView.settings.allowContentAccess = true
         webView.settings.allowFileAccess = true
-        webView.webChromeClient =  object : WebChromeClient() {
+        webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
@@ -97,7 +101,7 @@ class WebViewActivity : AppCompatActivity() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 super.onProgressChanged(view, newProgress)
                 progressBar.progress = newProgress
-                if(newProgress == 100) progressBar.visibility = View.INVISIBLE
+                if (newProgress == 100) progressBar.visibility = View.INVISIBLE
             }
 
             override fun onPermissionRequest(request: PermissionRequest) {
@@ -133,8 +137,7 @@ class WebViewActivity : AppCompatActivity() {
                 if (newUrl.startsWith("mailto:")) {
                     startActivity(Intent(Intent.ACTION_VIEW, newUrl.toUri()))
                     return true
-                }
-                else if (checkUrl(newUrl)) {
+                } else if (checkUrl(newUrl)) {
                     BrowserPlugin.onNavigationCancel(newUrl)
                     return true
                 }
@@ -142,7 +145,7 @@ class WebViewActivity : AppCompatActivity() {
                 return false
             }
         }
-        if(headers != null) webView.loadUrl(url, headers) else webView.loadUrl(url)
+        if (headers != null) webView.loadUrl(url, headers) else webView.loadUrl(url)
     }
 
     override fun onDestroy() {
@@ -151,9 +154,8 @@ class WebViewActivity : AppCompatActivity() {
         finish()
     }
 
-    companion object{
+    companion object {
 
-        private const val PICKER = 1
         private const val REQUEST_CODE = 2
     }
 }

@@ -2,7 +2,7 @@ package com.in_app.webview
 
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
+import androidx.core.net.toUri
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -12,45 +12,64 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
-import io.flutter.plugin.common.PluginRegistry.ActivityResultListener
-import io.flutter.plugin.common.StandardMethodCodec
 
 
 /** BrowserPlugin */
-class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener {
+class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     companion object {
         const val CHANNEL = "inapp_webview_channel"
         var methodChannel: MethodChannel? = null
-        var activityPluginBinding: ActivityPluginBinding? = null
-        var messenger: BinaryMessenger? = null
-
-        private fun send(method: String, arguments: Any?) {
-            messenger?.send(
-                CHANNEL,
-                StandardMethodCodec.INSTANCE.encodeMethodCall(MethodCall(method, arguments))
-            )
-        }
+        private var flutterPluginBinding: FlutterPluginBinding? = null
 
         fun onNavigationCancel(url: String) {
-            send("onNavigationCancel", url)
+            methodChannel?.invokeMethod("onNavigationCancel", url)
         }
 
         fun onFinish() {
-           send("onFinish", null)
+            methodChannel?.invokeMethod("onFinish", null)
         }
     }
 
     private var activity: Activity? = null
 
-    override fun onAttachedToEngine(flutterPluginBinding: FlutterPluginBinding) {
-        if (messenger == null) messenger = flutterPluginBinding.binaryMessenger
-        methodChannel = MethodChannel(flutterPluginBinding.binaryMessenger, CHANNEL)
-        methodChannel!!.setMethodCallHandler(this)
+    private fun initPlugin(binaryMessenger: BinaryMessenger) {
+        methodChannel = MethodChannel(binaryMessenger, CHANNEL)
+        methodChannel?.setMethodCallHandler(this)
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+    override fun onAttachedToEngine(flutterPluginBinding: FlutterPluginBinding) {
+        BrowserPlugin.flutterPluginBinding = flutterPluginBinding
+
+        if (methodChannel == null) {
+            initPlugin(flutterPluginBinding.binaryMessenger)
+        }
+    }
+
+    override fun onDetachedFromEngine(binding: FlutterPluginBinding) {
         TODO("Not yet implemented")
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+
+        flutterPluginBinding?.binaryMessenger?.let {
+            // Reinitialize MethodChannel Forcefully from MainIsolate
+            initPlugin(it)
+        }
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activity = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivity() {
+        activity = null
+        methodChannel = null
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
@@ -81,12 +100,14 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
                 activity?.startActivityForResult(intent, 20)
                 result.success(null)
             }
+
             "openTWA" -> {
                 val intent = Intent(activity, LauncherActivity::class.java).apply {
-                    data = call.argument<String>("url")?.let { Uri.parse(it) }
+                    data = call.argument<String>("url")?.toUri()
                 }
                 activity?.startActivity(intent)
             }
+
             "isTWASupported" -> {
                 result.success(
                     activity?.applicationContext?.packageManager?.let
@@ -94,37 +115,15 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware, ActivityR
                         ?: false
                 )
             }
+
             "close" -> {
                 activity?.finishActivity(20)
                 result.success(null)
             }
+
             else -> {
                 result.notImplemented()
             }
         }
-    }
-
-    override fun onDetachedFromEngine(binding: FlutterPluginBinding) {
-        methodChannel?.setMethodCallHandler(null)
-        methodChannel = null
-    }
-
-    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-        activity = binding.activity
-        activityPluginBinding =  binding
-    }
-
-    override fun onDetachedFromActivityForConfigChanges() {
-        activity = null
-        activityPluginBinding = null
-    }
-
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        activity = binding.activity
-        activityPluginBinding =  binding
-    }
-
-    override fun onDetachedFromActivity() {
-        activity = null
     }
 }
