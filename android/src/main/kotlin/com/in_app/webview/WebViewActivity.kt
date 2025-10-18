@@ -2,23 +2,13 @@ package com.in_app.webview
 
 import android.annotation.SuppressLint
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
-import android.view.View
-import android.webkit.PermissionRequest
-import android.webkit.ValueCallback
-import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ProgressBar
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import java.util.regex.Pattern
 
@@ -26,8 +16,6 @@ import java.util.regex.Pattern
 class WebViewActivity : AppCompatActivity() {
     private lateinit var webView: WebView
 
-    private var pickerCallback: ValueCallback<Array<Uri>>? = null
-    private var resultLauncher: ActivityResultLauncher<Intent>? = null
     private var invalidUrlPatternList: List<Pattern>? = null
 
     private fun checkUrl(url: String): Boolean {
@@ -41,19 +29,6 @@ class WebViewActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-
-        resultLauncher =
-            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-                if (pickerCallback != null) {
-                    val result = WebChromeClient.FileChooserParams.parseResult(
-                        result.resultCode,
-                        result.data
-                    )
-                    pickerCallback!!.onReceiveValue(result)
-                    pickerCallback = null
-                }
-            }
 
         setContentView(R.layout.webview_activity)
         webView = findViewById(R.id.webview)
@@ -79,54 +54,8 @@ class WebViewActivity : AppCompatActivity() {
         webView.settings.domStorageEnabled = true
         webView.settings.allowContentAccess = true
         webView.settings.allowFileAccess = true
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onShowFileChooser(
-                webView: WebView?,
-                filePathCallback: ValueCallback<Array<Uri>>?,
-                fileChooserParams: FileChooserParams?
-            ): Boolean {
-                pickerCallback?.onReceiveValue(null)
-                pickerCallback = filePathCallback
+        webView.webChromeClient = WebViewChromeClient(this)
 
-                val intent = fileChooserParams?.createIntent()
-                if (intent != null && resultLauncher != null) {
-                    pickerCallback = filePathCallback
-                    resultLauncher!!.launch(intent)
-                    return true
-                }
-
-                return false
-            }
-
-            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                super.onProgressChanged(view, newProgress)
-                progressBar.progress = newProgress
-                if (newProgress == 100) progressBar.visibility = View.INVISIBLE
-            }
-
-            override fun onPermissionRequest(request: PermissionRequest) {
-                runOnUiThread {
-                    if ("android.webkit.resource.VIDEO_CAPTURE" == request.resources[0]) {
-                        if (ContextCompat.checkSelfPermission(
-                                applicationContext,
-                                android.Manifest.permission.CAMERA
-                            ) == PackageManager.PERMISSION_GRANTED
-                        ) {
-                            request.grant(request.resources)
-                        } else {
-                            ActivityCompat.requestPermissions(
-                                this@WebViewActivity,
-                                arrayOf(
-                                    android.Manifest.permission.CAMERA,
-                                    android.Manifest.permission.READ_EXTERNAL_STORAGE
-                                ),
-                                REQUEST_CODE
-                            )
-                        }
-                    }
-                }
-            }
-        }
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView?,
@@ -152,10 +81,5 @@ class WebViewActivity : AppCompatActivity() {
         super.onDestroy()
         BrowserPlugin.onFinish()
         finish()
-    }
-
-    companion object {
-
-        private const val REQUEST_CODE = 2
     }
 }
