@@ -2,6 +2,7 @@ package com.in_app.webview
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -21,10 +22,23 @@ class TurnstileActivity : AppCompatActivity() {
 
         val html = intent.getStringExtra("html") ?: run { finish(); return }
 
-        webView.settings.javaScriptEnabled = true
-        webView.settings.domStorageEnabled = true
-        webView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            allowFileAccess = true
+            allowContentAccess = true
+            // Lock User-Agent to prevent mid-session changes (Cloudflare requirement)
+            userAgentString = userAgentString
+        }
 
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(webView, true)
+        }
+
+        webView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         webView.addJavascriptInterface(TurnstileBridge(), "TurnstileBridge")
 
         webView.webViewClient = object : WebViewClient() {
@@ -32,7 +46,16 @@ class TurnstileActivity : AppCompatActivity() {
                 view: WebView?,
                 request: WebResourceRequest?
             ): Boolean {
-                return false
+                val url = request?.url?.toString() ?: return true
+                val host = request.url?.host ?: ""
+                if (host.contains("challenges.cloudflare.com") ||
+                    host.contains("localhost") ||
+                    url.startsWith("about:blank") ||
+                    url.startsWith("about:srcdoc")
+                ) {
+                    return false
+                }
+                return true
             }
         }
 

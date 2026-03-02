@@ -36,6 +36,30 @@ class TurnstileViewController: UIViewController, WKNavigationDelegate, WKScriptM
         ])
     }
 
+    // MARK: - WKNavigationDelegate
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.allow)
+            return
+        }
+
+        let allowed = [
+            "challenges.cloudflare.com",
+            "localhost",
+        ]
+
+        if url.scheme == "about" ||
+           allowed.contains(where: { url.host?.contains($0) == true }) {
+            decisionHandler(.allow)
+        } else {
+            decisionHandler(.cancel)
+        }
+    }
+
+    // MARK: - WKScriptMessageHandler
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "turnstile",
               let body = message.body as? String,
