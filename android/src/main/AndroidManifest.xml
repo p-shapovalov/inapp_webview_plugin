@@ -9,6 +9,11 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:screenOrientation="fullSensor"
             android:exported="false" />
+
+        <activity
+            android:name=".TurnstileActivity"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:exported="false" />
     </application>
 
 </manifest>

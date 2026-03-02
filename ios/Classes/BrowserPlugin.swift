@@ -14,6 +14,8 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
         methodChannel = channel
     }
 
+    static var turnstileViewController: TurnstileViewController?
+
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         if call.method == "open" {
             guard let args = call.arguments as? [String: Any],
@@ -36,6 +38,21 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
             rootViewController.pushViewController(webViewController, animated: true)
             BrowserPlugin.webViewController = webViewController
 
+            result(nil)
+
+        } else if call.method == "openTurnstile" {
+            guard let args = call.arguments as? [String: Any],
+                  let html = args["html"] as? String,
+                  let rootViewController = UIApplication.shared.keyWindow?.rootViewController as? UINavigationController else {
+                result(FlutterError(code: "INVALID_ARGUMENTS", message: "Missing html", details: nil))
+                return
+            }
+
+            let vc = TurnstileViewController()
+            vc.html = html
+
+            rootViewController.pushViewController(vc, animated: true)
+            BrowserPlugin.turnstileViewController = vc
             result(nil)
 
         } else if call.method == "close" {

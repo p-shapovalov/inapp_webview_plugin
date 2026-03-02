@@ -115,6 +115,27 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 )
             }
 
+            "openTurnstile" -> {
+                val html = call.argument<String>("html")
+
+                if (activity == null) {
+                    result.error("NO_ACTIVITY", "Activity is null", null)
+                    return
+                }
+
+                if (html == null) {
+                    result.error("invalid_arguments", "html is null", null)
+                    return
+                }
+
+                val intent = Intent(activity, TurnstileActivity::class.java).apply {
+                    putExtra("html", html)
+                }
+
+                activity?.startActivity(intent)
+                result.success(null)
+            }
+
             "close" -> {
                 activity?.finishActivity(20)
                 result.success(null)
