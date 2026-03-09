@@ -2,6 +2,7 @@ package com.in_app.webview
 
 import android.app.Activity
 import android.content.Intent
+import android.webkit.WebView
 import androidx.core.net.toUri
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
@@ -134,6 +135,18 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
                 activity?.startActivity(intent)
                 result.success(null)
+            }
+
+            "isWebViewAvailable" -> {
+                result.success(try {
+                    WebView(activity ?: result.run {
+                        error("NO_ACTIVITY", "Activity is null", null)
+                        return
+                    }).destroy()
+                    true
+                } catch (e: Exception) {
+                    false
+                })
             }
 
             "close" -> {
