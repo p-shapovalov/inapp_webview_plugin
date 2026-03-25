@@ -150,9 +150,14 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         return match != nil
     }
     
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isMovingFromParent {
+            BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
+        }
+    }
+
     func close() {
-        BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
         self.navigationController?.popViewController(animated: true)
     }
 }
-
