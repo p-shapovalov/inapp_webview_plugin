@@ -9,11 +9,21 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     
     
     var progressBar = UIProgressView(progressViewStyle: .bar)
-    var progressBarTimer: Timer!
+    var progressBarTimer: Timer?
+
+    // The iOS 18.x WebContent-process crash (FB15670666) is repeatable on a
+    // bad page — without a cap, reload() → crash → reload() spins forever.
+    private var processCrashReloadsLeft = 2
     func startIndefiniteProgress() {
         progressBarTimer = Timer.scheduledTimer(timeInterval: 0.03, target: self, selector: #selector(updateProgressView), userInfo: nil, repeats: true)
     }
-    
+
+    private func stopIndefiniteProgress() {
+        progressBarTimer?.invalidate()
+        progressBarTimer = nil
+        progressBar.isHidden = true
+    }
+
     @objc func updateProgressView() {
         progressBar.progress += 0.01
         if progressBar.progress >= 1.0 {
@@ -106,12 +116,91 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webView.isHidden = false
-        progressBar.isHidden = true
+        stopIndefiniteProgress()
     }
-    
+
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         webView.isHidden = false
-        progressBar.isHidden = true
+        stopIndefiniteProgress()
+        notifyLoadError(error)
+    }
+
+    // iOS 18.7.x WKWebView is more aggressive about provisional failures
+    // (TLS / DNS / ATS / connection drops). Without this, the webview stays
+    // hidden in loadPage() and the user sees only the background color.
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        webView.isHidden = false
+        stopIndefiniteProgress()
+        notifyLoadError(error)
+    }
+
+    // Open WebKit regression (FB15670666) on iOS 18.x — the WebContent
+    // process can be killed after repeated reloads. Apple's recommended
+    // recovery is to reload, but the crash often recurs on the same page,
+    // so cap retries and surface the failure once we give up.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard processCrashReloadsLeft > 0 else {
+            webView.isHidden = false
+            stopIndefiniteProgress()
+            BrowserPlugin.methodChannel?.invokeMethod("onLoadError", arguments: [
+                "code": -1,
+                "domain": "WKWebViewProcessDidTerminate",
+                "message": "Web content process terminated repeatedly",
+                "category": "process",
+            ])
+            return
+        }
+        processCrashReloadsLeft -= 1
+        webView.reload()
+    }
+
+    private func notifyLoadError(_ error: Error) {
+        let ns = error as NSError
+        // -999 fires when we intentionally cancel a navigation in
+        // decidePolicyFor (deeplinks) or the user backs out — not a load
+        // failure the caller should react to.
+        if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled {
+            return
+        }
+        BrowserPlugin.methodChannel?.invokeMethod("onLoadError", arguments: [
+            "code": ns.code,
+            "domain": ns.domain,
+            "message": ns.localizedDescription,
+            "category": Self.errorCategory(for: ns),
+        ])
+    }
+
+    private static func errorCategory(for error: NSError) -> String {
+        guard error.domain == NSURLErrorDomain else { return "other" }
+        switch error.code {
+        case NSURLErrorNotConnectedToInternet,
+             NSURLErrorNetworkConnectionLost,
+             NSURLErrorTimedOut,
+             NSURLErrorCannotFindHost,
+             NSURLErrorCannotConnectToHost,
+             NSURLErrorDNSLookupFailed,
+             NSURLErrorInternationalRoamingOff,
+             NSURLErrorCallIsActive,
+             NSURLErrorDataNotAllowed:
+            return "network"
+        case NSURLErrorBadServerResponse,
+             NSURLErrorZeroByteResource,
+             NSURLErrorRedirectToNonExistentLocation,
+             NSURLErrorBadURL,
+             NSURLErrorUnsupportedURL:
+            return "server"
+        case NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateHasUnknownRoot,
+             NSURLErrorServerCertificateNotYetValid,
+             NSURLErrorClientCertificateRejected,
+             NSURLErrorClientCertificateRequired,
+             NSURLErrorAppTransportSecurityRequiresSecureConnection,
+             NSURLErrorSecureConnectionFailed:
+            return "tls"
+        default:
+            return "other"
+        }
     }
     
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
@@ -153,8 +242,19 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if isMovingFromParent {
+            // Stop in-flight load and detach delegate so callbacks that race
+            // dismissal (didFinish/didFail firing after the user pops) don't
+            // touch a half-torn-down VC. Late-fire after pop is a documented
+            // source of crashes and Sentry noise.
+            webView.stopLoading()
+            webView.navigationDelegate = nil
+            stopIndefiniteProgress()
             BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
         }
+    }
+
+    deinit {
+        progressBarTimer?.invalidate()
     }
 
     func close() {

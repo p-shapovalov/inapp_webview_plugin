@@ -70,6 +70,7 @@ class BrowserPlugin {
   static Function(String)? onTurnstileToken;
   static Function(String)? onTurnstileError;
   static VoidCallback? onTurnstileExpired;
+  static Function(WebViewLoadError)? onLoadError;
 
   static Future _handleMethod(MethodCall call) async {
     switch (call.method) {
@@ -88,6 +89,47 @@ class BrowserPlugin {
       case 'onTurnstileExpired':
         onTurnstileExpired?.call();
         break;
+      case 'onLoadError':
+        final args = Map<String, dynamic>.from(call.arguments as Map);
+        onLoadError?.call(WebViewLoadError(
+          code: args['code'] as int? ?? 0,
+          domain: args['domain'] as String? ?? '',
+          message: args['message'] as String? ?? '',
+          category: WebViewLoadErrorCategory.fromString(args['category'] as String?),
+        ));
+        break;
     }
   }
+}
+
+enum WebViewLoadErrorCategory {
+  network,
+  server,
+  tls,
+  process,
+  other;
+
+  static WebViewLoadErrorCategory fromString(String? raw) => switch (raw) {
+        'network' => WebViewLoadErrorCategory.network,
+        'server' => WebViewLoadErrorCategory.server,
+        'tls' => WebViewLoadErrorCategory.tls,
+        'process' => WebViewLoadErrorCategory.process,
+        _ => WebViewLoadErrorCategory.other,
+      };
+}
+
+class WebViewLoadError {
+  final int code;
+  final String domain;
+  final String message;
+  final WebViewLoadErrorCategory category;
+  const WebViewLoadError({
+    required this.code,
+    required this.domain,
+    required this.message,
+    required this.category,
+  });
+
+  @override
+  String toString() => 'WebViewLoadError(${category.name} — $domain $code: $message)';
 }
