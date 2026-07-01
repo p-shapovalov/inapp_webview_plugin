@@ -151,6 +151,13 @@ class WebViewController: UIViewController, WKNavigationDelegate {
             return
         }
         processCrashReloadsLeft -= 1
+        // Tell the host we are auto-reloading after a crash: this reload can
+        // silently re-enter/restart an in-flight survey (and, if the prior
+        // completion POST's 200 was lost, re-drive completion). Host logs it.
+        BrowserPlugin.methodChannel?.invokeMethod("onWebViewReload", arguments: [
+            "reason": "process_terminate",
+            "attempt": 2 - processCrashReloadsLeft,
+        ])
         webView.reload()
     }
 
@@ -255,6 +262,20 @@ class WebViewController: UIViewController, WKNavigationDelegate {
 
     deinit {
         progressBarTimer?.invalidate()
+    }
+
+    // Reload the survey page IN PLACE to recover from a transient load failure
+    // (e.g. an iOS 18.x provisional network failure) without tearing the survey
+    // down. Reloads the current page, or re-loads the original URL if the
+    // provisional load never committed.
+    func reload() {
+        startIndefiniteProgress()
+        webView.isHidden = true
+        if let current = webView.url, !current.absoluteString.isEmpty {
+            webView.reload()
+        } else {
+            loadPage()
+        }
     }
 
     func close() {

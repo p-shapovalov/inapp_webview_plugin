@@ -29,9 +29,9 @@ class BrowserPlugin {
   Future open(String url, {List<String>? invalidUrlRegex, Map<String, String>? headers, Color? color}) =>
       _channel.invokeMethod('open', {
         'url': url,
-        if (headers != null) 'invalidUrlRegex': headers,
-        if (invalidUrlRegex != null) 'invalidUrlRegex': invalidUrlRegex,
-        if (color != null) 'color': color.value
+        'headers': ?headers,
+        'invalidUrlRegex': ?invalidUrlRegex,
+        if (color != null) 'color': color.toARGB32()
       });
 
   Future openTWA(String url) async => {
@@ -48,6 +48,10 @@ class BrowserPlugin {
   }
 
   Future close() => _channel.invokeMethod('close');
+
+  /// Reload the current WebView page in place (no teardown), to recover from a
+  /// transient load failure without restarting/closing the survey.
+  Future reload() => _channel.invokeMethod('reload');
 
   Future openTurnstile(
     String siteKey, {
@@ -71,6 +75,11 @@ class BrowserPlugin {
   static Function(String)? onTurnstileError;
   static VoidCallback? onTurnstileExpired;
   static Function(WebViewLoadError)? onLoadError;
+
+  /// Fired when the native layer had to reload the page to recover from a
+  /// WebView crash (iOS WebContent-process termination). Host can use it for
+  /// telemetry — the reload can silently re-enter/restart an in-flight survey.
+  static VoidCallback? onWebViewReload;
 
   static Future _handleMethod(MethodCall call) async {
     switch (call.method) {
@@ -97,6 +106,9 @@ class BrowserPlugin {
           message: args['message'] as String? ?? '',
           category: WebViewLoadErrorCategory.fromString(args['category'] as String?),
         ));
+        break;
+      case 'onWebViewReload':
+        onWebViewReload?.call();
         break;
     }
   }

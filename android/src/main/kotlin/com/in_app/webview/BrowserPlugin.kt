@@ -30,6 +30,18 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         fun onFinish() {
             methodChannel?.invokeMethod("onFinish", null)
         }
+
+        fun onLoadError(code: Int, domain: String, message: String, category: String) {
+            methodChannel?.invokeMethod(
+                "onLoadError",
+                mapOf(
+                    "code" to code,
+                    "domain" to domain,
+                    "message" to message,
+                    "category" to category,
+                ),
+            )
+        }
     }
 
     private var activity: Activity? = null
@@ -151,6 +163,11 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
             "close" -> {
                 activity?.finishActivity(20)
+                result.success(null)
+            }
+
+            "reload" -> {
+                WebViewActivity.instance?.reloadWebView()
                 result.success(null)
             }
 

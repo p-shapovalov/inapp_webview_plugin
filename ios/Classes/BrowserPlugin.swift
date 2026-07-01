@@ -61,6 +61,9 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
                 BrowserPlugin.webViewController = nil
             }
             result(nil)
+        } else if call.method == "reload" {
+            BrowserPlugin.webViewController?.reload()
+            result(nil)
         } else {
             result(FlutterMethodNotImplemented)
         }
