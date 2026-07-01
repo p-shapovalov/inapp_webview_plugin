@@ -42,6 +42,14 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 ),
             )
         }
+
+        fun onWebViewReload() {
+            methodChannel?.invokeMethod("onWebViewReload", null)
+        }
+
+        fun onWebViewLoaded() {
+            methodChannel?.invokeMethod("onWebViewLoaded", null)
+        }
     }
 
     private var activity: Activity? = null

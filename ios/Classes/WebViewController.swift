@@ -11,9 +11,18 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     var progressBar = UIProgressView(progressViewStyle: .bar)
     var progressBarTimer: Timer?
 
-    // The iOS 18.x WebContent-process crash (FB15670666) is repeatable on a
-    // bad page — without a cap, reload() → crash → reload() spins forever.
-    private var processCrashReloadsLeft = 2
+    // Cap self-healing recreations so a genuinely-bad page (FB15670666, an iOS
+    // 18.x WebContent-process crash that recurs on the same page) can't loop.
+    // The budget is CONSECUTIVE, not lifetime: once a recreated page loads and
+    // stays up for stabilityWindow, didFinish's stabilityTimer refills it, so a
+    // long survey that hits well-spaced crashes keeps recovering. A tight loop
+    // (crash before the timer fires) never refills → gives up after maxRecreates.
+    private static let maxRecreates = 2
+    private static let stabilityWindow: TimeInterval = 10
+    private var recreatesLeft = WebViewController.maxRecreates
+    private var stabilityTimer: Timer?
+    private var isClosing = false
+    private var hasLoaded = false
     func startIndefiniteProgress() {
         progressBarTimer = Timer.scheduledTimer(timeInterval: 0.03, target: self, selector: #selector(updateProgressView), userInfo: nil, repeats: true)
     }
@@ -31,22 +40,26 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         }
     }
     
-    private lazy var webView: WKWebView = {
+    // Recreatable (not lazy): a jetsam'd WebContent process leaves a dead
+    // WKWebView that only a fresh instance can recover — see recreateWebView().
+    private var webView: WKWebView!
+
+    private func makeWebView() -> WKWebView {
         let webConfiguration = WKWebViewConfiguration()
         webConfiguration.preferences.javaScriptEnabled = true
         webConfiguration.websiteDataStore = WKWebsiteDataStore.default()
         webConfiguration.allowsInlineMediaPlayback = true
         webConfiguration.mediaTypesRequiringUserActionForPlayback = []
-        
+
         let webView = WKWebView(frame: .zero, configuration: webConfiguration)
         webView.navigationDelegate = self
         webView.isUserInteractionEnabled = true
         webView.allowsLinkPreview = false
-       webView.allowsBackForwardNavigationGestures = true
+        webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.showsHorizontalScrollIndicator = false
         webView.scrollView.showsVerticalScrollIndicator = false
         return webView
-    }()
+    }
     
     private func uiColor(fromInt value: Int64) -> UIColor {
         return UIColor(red: CGFloat((value & 0xFF0000) >> 16) / 0xFF,
@@ -56,6 +69,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     }
     
     override func viewDidLoad() {
+        webView = makeWebView()
         if (color != nil) {
             let c =  uiColor(fromInt: color!)
             self.view.backgroundColor = c
@@ -66,25 +80,45 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         super.viewDidLoad()
         setupUI()
         loadPage()
+        // A backgrounded WKWebView is the #1 jetsam trigger and often does NOT
+        // fire webViewWebContentProcessDidTerminate — probe on foreground and
+        // recreate if the WebContent process is dead (blank-page recovery).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil)
+    }
+
+    @objc private func appWillEnterForeground() {
+        guard !isClosing, hasLoaded else { return }
+        // A dead WebContent process fails JS eval; a live one returns a string.
+        webView.evaluateJavaScript("document.readyState") { [weak self] _, error in
+            if error != nil { self?.recreateWebView() }
+        }
     }
     
     private func setupUI() {
-        webView.translatesAutoresizingMaskIntoConstraints = false
         progressBar.translatesAutoresizingMaskIntoConstraints = false
-        
-        view.insertSubview(progressBar, aboveSubview: webView)
-        view.addSubview(webView)
-        
+        attachWebView()
+        view.addSubview(progressBar)
+
         progressBar.topAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.topAnchor, constant: 0.0).isActive = true
         progressBar.leadingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.leadingAnchor, constant: 0.0).isActive = true
         progressBar.trailingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.trailingAnchor, constant: 0.0).isActive = true
-        
-            NSLayoutConstraint.activate([
-                webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-                webView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-                webView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-                webView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-            ])
+    }
+
+    // Add the current webView below the progress bar with edge constraints.
+    // Reused when recreateWebView() swaps in a fresh instance.
+    private func attachWebView() {
+        webView.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(webView, at: 0)
+        NSLayoutConstraint.activate([
+            webView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            webView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            webView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            webView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+        ])
     }
     
     @objc func keyboardWillShow(notification: NSNotification) {
@@ -116,7 +150,18 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webView.isHidden = false
+        hasLoaded = true
         stopIndefiniteProgress()
+        // Tell the host a load succeeded (host resets its transient-network
+        // inline-retry budget — see base_web_survey_page onWebViewLoaded).
+        BrowserPlugin.methodChannel?.invokeMethod("onWebViewLoaded", arguments: nil)
+        // Refill the recreate budget only if this load STAYS up: a tight
+        // crash-on-load loop recreates before the timer fires (recreateWebView
+        // invalidates it), so it never refills; a stable load does.
+        stabilityTimer?.invalidate()
+        stabilityTimer = Timer.scheduledTimer(withTimeInterval: Self.stabilityWindow, repeats: false) { [weak self] _ in
+            self?.recreatesLeft = Self.maxRecreates
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -134,31 +179,52 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         notifyLoadError(error)
     }
 
-    // Open WebKit regression (FB15670666) on iOS 18.x — the WebContent
-    // process can be killed after repeated reloads. Apple's recommended
-    // recovery is to reload, but the crash often recurs on the same page,
-    // so cap retries and surface the failure once we give up.
+    // Open WebKit regression (FB15670666) on iOS 18.x — the WebContent process
+    // can be killed (memory pressure / backgrounding). reload() is unreliable
+    // once the process is dead, so recover by recreating the WKWebView.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        guard processCrashReloadsLeft > 0 else {
+        recreateWebView()
+    }
+
+    // Blank-page recovery: swap in a fresh WKWebView and reload the URL (which
+    // carries sessionId, so the survey resumes server-side rather than
+    // restarting). Capped so a genuinely-bad page can't loop; on exhaustion,
+    // report a fatal load error so the host can surface its retry dialog.
+    private func recreateWebView() {
+        guard !isClosing else { return }
+        // A crash cancels any pending budget refill — only a load that survives
+        // the full stabilityWindow counts as recovered.
+        stabilityTimer?.invalidate()
+        guard recreatesLeft > 0 else {
             webView.isHidden = false
             stopIndefiniteProgress()
             BrowserPlugin.methodChannel?.invokeMethod("onLoadError", arguments: [
                 "code": -1,
                 "domain": "WKWebViewProcessDidTerminate",
-                "message": "Web content process terminated repeatedly",
+                "message": "Web content process died; recovery exhausted",
                 "category": "process",
             ])
             return
         }
-        processCrashReloadsLeft -= 1
-        // Tell the host we are auto-reloading after a crash: this reload can
-        // silently re-enter/restart an in-flight survey (and, if the prior
-        // completion POST's 200 was lost, re-drive completion). Host logs it.
+        recreatesLeft -= 1
+        let old: WKWebView? = webView
+        old?.stopLoading()
+        old?.navigationDelegate = nil
+        old?.removeFromSuperview()
+        webView = makeWebView()
+        if color != nil {
+            let c = uiColor(fromInt: color!)
+            webView.backgroundColor = c
+            webView.scrollView.backgroundColor = c
+        }
+        attachWebView()
+        // Recovery telemetry — the recreate re-enters the survey (resumes via
+        // sessionId); the host logs it (see base_web_survey_page onWebViewReload).
         BrowserPlugin.methodChannel?.invokeMethod("onWebViewReload", arguments: [
-            "reason": "process_terminate",
-            "attempt": 2 - processCrashReloadsLeft,
+            "reason": "recreate",
+            "attempt": Self.maxRecreates - recreatesLeft,
         ])
-        webView.reload()
+        loadPage()
     }
 
     private func notifyLoadError(_ error: Error) {
@@ -249,19 +315,23 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if isMovingFromParent {
+            isClosing = true
             // Stop in-flight load and detach delegate so callbacks that race
             // dismissal (didFinish/didFail firing after the user pops) don't
             // touch a half-torn-down VC. Late-fire after pop is a documented
             // source of crashes and Sentry noise.
             webView.stopLoading()
             webView.navigationDelegate = nil
+            stabilityTimer?.invalidate()
             stopIndefiniteProgress()
             BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
         }
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         progressBarTimer?.invalidate()
+        stabilityTimer?.invalidate()
     }
 
     // Reload the survey page IN PLACE to recover from a transient load failure
@@ -279,6 +349,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     }
 
     func close() {
+        isClosing = true
         self.navigationController?.popViewController(animated: true)
     }
 }

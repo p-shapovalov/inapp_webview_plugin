@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceError
@@ -11,7 +13,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import android.widget.ProgressBar
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.net.toUri
@@ -28,6 +29,21 @@ class WebViewActivity : AppCompatActivity() {
     private lateinit var webView: WebView
 
     private var invalidUrlPatternList: List<Pattern>? = null
+    private var pageUrl: String? = null
+    private var pageHeaders: HashMap<String, String>? = null
+    private var bgColor: Int? = null
+    private var isClosing = false
+
+    // Cap self-healing recreations so a genuinely-bad page can't loop. The
+    // budget is CONSECUTIVE, not lifetime: a page that loads and stays up for
+    // stabilityWindowMs (onPageFinished's stabilityRunnable) refills it, so a
+    // long survey survives well-spaced render kills; a tight crash-on-load loop
+    // recreates before the runnable fires and never refills.
+    private val maxRecreates = 2
+    private val stabilityWindowMs = 10_000L
+    private var recreatesLeft = maxRecreates
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val stabilityRunnable = Runnable { recreatesLeft = maxRecreates }
 
     fun reloadWebView() {
         runOnUiThread { if (::webView.isInitialized) webView.reload() }
@@ -56,7 +72,6 @@ class WebViewActivity : AppCompatActivity() {
         else -> "other"
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -64,14 +79,12 @@ class WebViewActivity : AppCompatActivity() {
         webView = findViewById(R.id.webview)
         instance = this
         val layout = findViewById<FrameLayout>(R.id.relativeLayout)
-        val progressBar = findViewById<ProgressBar>(R.id.progressBar)
         val extras = intent.extras ?: return
         val url = extras.getString("url")
-        val headers = intent.getSerializableExtra("headers") as HashMap<String, String>?
+        pageHeaders = intent.getSerializableExtra("headers") as HashMap<String, String>?
 
-        val color = extras.getLong("color")
-        webView.setBackgroundColor(color.toInt())
-        layout.setBackgroundColor(color.toInt())
+        bgColor = extras.getLong("color").toInt()
+        bgColor?.let { layout.setBackgroundColor(it) }
 
         invalidUrlPatternList =
             intent.getStringArrayExtra("invalidUrlRegex")?.map { Pattern.compile(it) }
@@ -80,14 +93,57 @@ class WebViewActivity : AppCompatActivity() {
             finish()
             return
         }
+        pageUrl = url
 
-        webView.settings.javaScriptEnabled = true
-        webView.settings.domStorageEnabled = true
-        webView.settings.allowContentAccess = true
-        webView.settings.allowFileAccess = true
-        webView.webChromeClient = WebViewChromeClient(this)
+        configureWebView(webView)
+        loadPage()
+    }
 
-        webView.webViewClient = object : WebViewClient() {
+    private fun loadPage() {
+        val u = pageUrl ?: return
+        pageHeaders?.let { webView.loadUrl(u, it) } ?: webView.loadUrl(u)
+    }
+
+    // Blank-page recovery: the render process was killed (onRenderProcessGone).
+    // Recreate the WebView and reload the URL (which carries sessionId, so the
+    // survey resumes server-side rather than restarting). Capped so a
+    // genuinely-bad page can't loop; on exhaustion, report a fatal load error.
+    private fun recreateWebView() {
+        if (isClosing) return
+        // A crash cancels any pending budget refill — only a load that survives
+        // the full stability window counts as recovered.
+        mainHandler.removeCallbacks(stabilityRunnable)
+        (webView.parent as? ViewGroup)?.removeView(webView)
+        webView.destroy()
+        if (recreatesLeft <= 0) {
+            BrowserPlugin.onLoadError(-1, "android", "render process gone; recovery exhausted", "process")
+            return
+        }
+        recreatesLeft -= 1
+        webView = WebView(this)
+        findViewById<FrameLayout>(R.id.relativeLayout).addView(
+            webView,
+            0,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        configureWebView(webView)
+        BrowserPlugin.onWebViewReload() // recovery telemetry
+        loadPage()
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun configureWebView(wv: WebView) {
+        bgColor?.let { wv.setBackgroundColor(it) }
+        wv.settings.javaScriptEnabled = true
+        wv.settings.domStorageEnabled = true
+        wv.settings.allowContentAccess = true
+        wv.settings.allowFileAccess = true
+        wv.webChromeClient = WebViewChromeClient(this)
+
+        wv.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView?,
                 request: WebResourceRequest?
@@ -103,6 +159,17 @@ class WebViewActivity : AppCompatActivity() {
                 }
 
                 return false
+            }
+
+            // A successful load ends any transient-failure streak: tell the
+            // host (resets its inline-retry budget) and arm the recreate-budget
+            // refill, which only fires if this load stays up (recreateWebView
+            // cancels it on a re-crash).
+            override fun onPageFinished(view: WebView?, url: String?) {
+                if (isClosing) return
+                BrowserPlugin.onWebViewLoaded()
+                mainHandler.removeCallbacks(stabilityRunnable)
+                mainHandler.postDelayed(stabilityRunnable, stabilityWindowMs)
             }
 
             // Report main-frame load failures to the host (parity with iOS
@@ -122,31 +189,24 @@ class WebViewActivity : AppCompatActivity() {
                 )
             }
 
-            // Without handling this, a WebView render-process kill (OOM /
-            // system pressure) crashes the whole host app. Detach the dead
-            // WebView, report it as a load error so the host can offer retry,
-            // and return true to keep the app alive.
+            // A render-process kill (OOM / system pressure) would crash the host
+            // app if unhandled. Recover in place by recreating the WebView;
+            // returning true keeps the app alive.
             @RequiresApi(Build.VERSION_CODES.O)
             override fun onRenderProcessGone(
                 view: WebView?,
                 detail: RenderProcessGoneDetail?
             ): Boolean {
-                (view?.parent as? ViewGroup)?.removeView(view)
-                view?.destroy()
-                BrowserPlugin.onLoadError(
-                    -1,
-                    "android",
-                    "render process gone (crash=${detail?.didCrash()})",
-                    "process"
-                )
+                recreateWebView()
                 return true
             }
         }
-        if (headers != null) webView.loadUrl(url, headers) else webView.loadUrl(url)
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        isClosing = true
+        mainHandler.removeCallbacks(stabilityRunnable)
         if (instance === this) instance = null
         BrowserPlugin.onFinish()
         finish()

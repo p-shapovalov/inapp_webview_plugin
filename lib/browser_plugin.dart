@@ -81,6 +81,11 @@ class BrowserPlugin {
   /// telemetry — the reload can silently re-enter/restart an in-flight survey.
   static VoidCallback? onWebViewReload;
 
+  /// Fired when a main-frame page load completes successfully (iOS didFinish /
+  /// Android onPageFinished). Host uses it to reset consecutive-failure retry
+  /// budgets — a load that succeeds ends any in-flight transient-error streak.
+  static VoidCallback? onWebViewLoaded;
+
   static Future _handleMethod(MethodCall call) async {
     switch (call.method) {
       case 'onFinish':
@@ -110,10 +115,17 @@ class BrowserPlugin {
       case 'onWebViewReload':
         onWebViewReload?.call();
         break;
+      case 'onWebViewLoaded':
+        onWebViewLoaded?.call();
+        break;
     }
   }
 }
 
+/// Shared error-category vocabulary. The mapping from platform error codes to
+/// these values is implemented natively in TWO places that MUST be kept in sync
+/// with this enum: iOS `WebViewController.errorCategory(for:)` and Android
+/// `WebViewActivity.categoryFor(code:)`.
 enum WebViewLoadErrorCategory {
   network,
   server,
@@ -128,6 +140,12 @@ enum WebViewLoadErrorCategory {
         'process' => WebViewLoadErrorCategory.process,
         _ => WebViewLoadErrorCategory.other,
       };
+
+  /// Transient failures worth an in-place reload. `process` (WebContent-process
+  /// give-up) and `other` are NOT recoverable this way — by the time the native
+  /// layer reports `process` it has already exhausted its own crash-recovery
+  /// reloads.
+  bool get isRecoverable => this == network || this == tls || this == server;
 }
 
 class WebViewLoadError {
