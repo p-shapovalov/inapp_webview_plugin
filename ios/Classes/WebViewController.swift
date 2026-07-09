@@ -19,8 +19,27 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     // (crash before the timer fires) never refills → gives up after maxRecreates.
     private static let maxRecreates = 2
     private static let stabilityWindow: TimeInterval = 10
+    // SPA boot watchdog: [bootProbeJs] is supplied by the Dart host through
+    // open() together with [bootProbeUrl] (URL-substring gate), so the page
+    // contract lives in ONE place. The probe must return 'ok' (booted),
+    // 'empty' (loaded but SPA never rendered -> recreate) or 'none' (marker
+    // absent -> no action). On probed pages the recreate-budget refill is
+    // gated on 'ok' — a bare-timer refill would make the budget unexhaustible
+    // and a permanently-unbootable page would loop forever. A single 'empty'
+    // gets one grace re-probe before recreating (slow bundles on slow links).
+    private static let bootWatchdogDelay: TimeInterval = 12
+    private static let bootProbeGraceDelay: TimeInterval = 10
+    // Consecutive budget refills make loops possible when the page keeps
+    // "recovering" (e.g. a partner page that render-crashes slower than the
+    // stability window) — the lifetime cap bounds them.
+    private static let maxLifetimeRecreates = 10
+    var bootProbeJs: String?
+    var bootProbeUrl: String?
+    private var bootProbeGraceUsed = false
+    private var totalRecreates = 0
     private var recreatesLeft = WebViewController.maxRecreates
     private var stabilityTimer: Timer?
+    private var bootWatchdogTimer: Timer?
     private var isClosing = false
     private var hasLoaded = false
     func startIndefiniteProgress() {
@@ -93,8 +112,13 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     @objc private func appWillEnterForeground() {
         guard !isClosing, hasLoaded else { return }
         // A dead WebContent process fails JS eval; a live one returns a string.
-        webView.evaluateJavaScript("document.readyState") { [weak self] _, error in
-            if error != nil { self?.recreateWebView() }
+        // The identity guard drops stale completions: recreateWebView may have
+        // already swapped the instance by the time this fires (a single jetsam
+        // must charge the recreate budget once, not per pending completion).
+        let probed: WKWebView = webView
+        probed.evaluateJavaScript("document.readyState") { [weak self] _, error in
+            guard let self, probed === self.webView else { return }
+            if error != nil { self.recreateWebView() }
         }
     }
     
@@ -159,14 +183,69 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         // crash-on-load loop recreates before the timer fires (recreateWebView
         // invalidates it), so it never refills; a stable load does.
         stabilityTimer?.invalidate()
-        stabilityTimer = Timer.scheduledTimer(withTimeInterval: Self.stabilityWindow, repeats: false) { [weak self] _ in
-            self?.recreatesLeft = Self.maxRecreates
+        bootWatchdogTimer?.invalidate()
+        bootProbeGraceUsed = false
+        if let probeUrl = bootProbeUrl, bootProbeJs != nil,
+           webView.url?.absoluteString.contains(probeUrl) == true {
+            scheduleBootProbe(after: Self.bootWatchdogDelay)
+        } else {
+            stabilityTimer = Timer.scheduledTimer(withTimeInterval: Self.stabilityWindow, repeats: false) { [weak self] _ in
+                self?.recreatesLeft = Self.maxRecreates
+            }
         }
+    }
+
+    private func scheduleBootProbe(after delay: TimeInterval) {
+        bootWatchdogTimer?.invalidate()
+        bootWatchdogTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            self?.probeSpaBoot()
+        }
+    }
+
+    private func probeSpaBoot() {
+        guard !isClosing, let probeJs = bootProbeJs else { return }
+        // A navigation in flight (e.g. the SPA's own reloaded=true recovery)
+        // means the DOM we'd probe is stale — give it one grace period instead
+        // of recreating (and thereby cancelling) a legitimate load.
+        if webView.isLoading {
+            if !bootProbeGraceUsed {
+                bootProbeGraceUsed = true
+                scheduleBootProbe(after: Self.bootProbeGraceDelay)
+            }
+            return
+        }
+        let probed: WKWebView = webView
+        probed.evaluateJavaScript(probeJs) { [weak self] result, error in
+            guard let self, probed === self.webView, !self.isClosing else { return }
+            if error != nil { return } // dead process -> didTerminate/foreground probe own it
+            switch result as? String {
+            case "ok":
+                self.recreatesLeft = Self.maxRecreates
+            case "empty":
+                if self.bootProbeGraceUsed {
+                    self.recreateWebView(reason: "boot-watchdog")
+                } else {
+                    self.bootProbeGraceUsed = true
+                    self.scheduleBootProbe(after: Self.bootProbeGraceDelay)
+                }
+            default:
+                break // 'none' or unexpected: marker absent, take no action
+            }
+        }
+    }
+
+    // A new navigation supersedes any pending post-load check for the previous
+    // document — without this, a stale probe can run against an error page.
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        stabilityTimer?.invalidate()
+        bootWatchdogTimer?.invalidate()
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         webView.isHidden = false
         stopIndefiniteProgress()
+        stabilityTimer?.invalidate()
+        bootWatchdogTimer?.invalidate()
         notifyLoadError(error)
     }
 
@@ -176,6 +255,8 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         webView.isHidden = false
         stopIndefiniteProgress()
+        stabilityTimer?.invalidate()
+        bootWatchdogTimer?.invalidate()
         notifyLoadError(error)
     }
 
@@ -190,23 +271,25 @@ class WebViewController: UIViewController, WKNavigationDelegate {
     // carries sessionId, so the survey resumes server-side rather than
     // restarting). Capped so a genuinely-bad page can't loop; on exhaustion,
     // report a fatal load error so the host can surface its retry dialog.
-    private func recreateWebView() {
+    private func recreateWebView(reason: String = "recreate") {
         guard !isClosing else { return }
         // A crash cancels any pending budget refill — only a load that survives
         // the full stabilityWindow counts as recovered.
         stabilityTimer?.invalidate()
-        guard recreatesLeft > 0 else {
+        bootWatchdogTimer?.invalidate()
+        guard recreatesLeft > 0, totalRecreates < Self.maxLifetimeRecreates else {
             webView.isHidden = false
             stopIndefiniteProgress()
             BrowserPlugin.methodChannel?.invokeMethod("onLoadError", arguments: [
                 "code": -1,
                 "domain": "WKWebViewProcessDidTerminate",
-                "message": "Web content process died; recovery exhausted",
+                "message": "\(reason): recovery exhausted",
                 "category": "process",
             ])
             return
         }
         recreatesLeft -= 1
+        totalRecreates += 1
         let old: WKWebView? = webView
         old?.stopLoading()
         old?.navigationDelegate = nil
@@ -221,8 +304,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         // Recovery telemetry — the recreate re-enters the survey (resumes via
         // sessionId); the host logs it (see base_web_survey_page onWebViewReload).
         BrowserPlugin.methodChannel?.invokeMethod("onWebViewReload", arguments: [
-            "reason": "recreate",
-            "attempt": Self.maxRecreates - recreatesLeft,
+            "reason": reason,
         ])
         loadPage()
     }
@@ -323,6 +405,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
             webView.stopLoading()
             webView.navigationDelegate = nil
             stabilityTimer?.invalidate()
+            bootWatchdogTimer?.invalidate()
             stopIndefiniteProgress()
             BrowserPlugin.methodChannel?.invokeMethod("onFinish", arguments: nil)
         }
@@ -332,6 +415,7 @@ class WebViewController: UIViewController, WKNavigationDelegate {
         NotificationCenter.default.removeObserver(self)
         progressBarTimer?.invalidate()
         stabilityTimer?.invalidate()
+        bootWatchdogTimer?.invalidate()
     }
 
     // Reload the survey page IN PLACE to recover from a transient load failure

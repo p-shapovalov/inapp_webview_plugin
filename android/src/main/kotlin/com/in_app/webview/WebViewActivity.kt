@@ -41,12 +41,37 @@ class WebViewActivity : AppCompatActivity() {
     // recreates before the runnable fires and never refills.
     private val maxRecreates = 2
     private val stabilityWindowMs = 10_000L
+    // The survey page HTML ships an EMPTY #survey-frame that the SPA renders
+    // into. If it is still empty this long after onPageFinished, the bundles
+    // never executed (edge asset failure / JS stall) — a "white page" no
+    // WebViewClient callback ever reports. Recreate under the same budget.
+    // On survey pages the recreate-budget refill is gated on the probe PASSING
+    // (not on a bare timer): a refill racing ahead of the probe would make the
+    // budget unexhaustible and a permanently-unbootable page would loop forever.
+    private val bootWatchdogDelayMs = 12_000L
+    private val bootProbeGraceDelayMs = 10_000L
+    // Consecutive budget refills make loops possible when the page keeps
+    // "recovering" (e.g. a partner page that render-crashes slower than the
+    // stability window) — the lifetime cap bounds them.
+    private val maxLifetimeRecreates = 10
+    // The CURRENT page load errored (set in onReceivedError, cleared when the
+    // next navigation starts): an errored onPageFinished must not count as a
+    // successful load — a reset retry budget on an error page loops the host's
+    // inline retry forever (seen in prod: 50 retry breadcrumbs all at attempt 1).
+    private var mainFrameErrored = false
+    // SPA boot-probe contract supplied by the Dart host via open() — see
+    // browser_plugin.dart `open(bootProbeJs:, bootProbeUrl:)`.
+    private var bootProbeJs: String? = null
+    private var bootProbeUrl: String? = null
+    private var bootProbeGraceUsed = false
+    private var totalRecreates = 0
     private var recreatesLeft = maxRecreates
     private val mainHandler = Handler(Looper.getMainLooper())
     private val stabilityRunnable = Runnable { recreatesLeft = maxRecreates }
+    private val bootWatchdogRunnable = Runnable { probeSpaBoot() }
 
     fun reloadWebView() {
-        runOnUiThread { if (::webView.isInitialized) webView.reload() }
+        runOnUiThread { if (!isClosing && ::webView.isInitialized) webView.reload() }
     }
 
     private fun checkUrl(url: String): Boolean {
@@ -88,6 +113,8 @@ class WebViewActivity : AppCompatActivity() {
 
         invalidUrlPatternList =
             intent.getStringArrayExtra("invalidUrlRegex")?.map { Pattern.compile(it) }
+        bootProbeJs = extras.getString("bootProbeJs")
+        bootProbeUrl = extras.getString("bootProbeUrl")
 
         if (url == null) {
             finish()
@@ -101,25 +128,61 @@ class WebViewActivity : AppCompatActivity() {
 
     private fun loadPage() {
         val u = pageUrl ?: return
+        mainFrameErrored = false
         pageHeaders?.let { webView.loadUrl(u, it) } ?: webView.loadUrl(u)
     }
 
-    // Blank-page recovery: the render process was killed (onRenderProcessGone).
-    // Recreate the WebView and reload the URL (which carries sessionId, so the
-    // survey resumes server-side rather than restarting). Capped so a
-    // genuinely-bad page can't loop; on exhaustion, report a fatal load error.
-    private fun recreateWebView() {
+    private fun probeSpaBoot() {
+        val probeJs = bootProbeJs ?: return
+        if (isClosing || !::webView.isInitialized) return
+        // A navigation in flight (e.g. the SPA's own reloaded=true recovery)
+        // means the DOM we'd probe is stale — give it one grace period instead
+        // of recreating (and thereby cancelling) a legitimate load.
+        if (webView.progress < 100) {
+            if (!bootProbeGraceUsed) {
+                bootProbeGraceUsed = true
+                mainHandler.postDelayed(bootWatchdogRunnable, bootProbeGraceDelayMs)
+            }
+            return
+        }
+        webView.evaluateJavascript(probeJs) { result ->
+            if (isClosing || !::webView.isInitialized) return@evaluateJavascript
+            when (result?.trim('"')) {
+                "ok" -> recreatesLeft = maxRecreates
+                "empty" ->
+                    if (bootProbeGraceUsed) {
+                        recreateWebView("boot-watchdog")
+                    } else {
+                        bootProbeGraceUsed = true
+                        mainHandler.postDelayed(bootWatchdogRunnable, bootProbeGraceDelayMs)
+                    }
+                else -> Unit // 'none' or unexpected: marker absent, take no action
+            }
+        }
+    }
+
+    // Blank-page recovery: the render process was killed (onRenderProcessGone)
+    // or the SPA never booted (boot watchdog). Recreate the WebView and reload
+    // the URL (which carries sessionId, so the survey resumes server-side
+    // rather than restarting). Capped so a genuinely-bad page can't loop; on
+    // exhaustion, report a fatal load error so the host can surface its dialog.
+    private fun recreateWebView(reason: String = "recreate") {
         if (isClosing) return
         // A crash cancels any pending budget refill — only a load that survives
         // the full stability window counts as recovered.
         mainHandler.removeCallbacks(stabilityRunnable)
-        (webView.parent as? ViewGroup)?.removeView(webView)
-        webView.destroy()
-        if (recreatesLeft <= 0) {
-            BrowserPlugin.onLoadError(-1, "android", "render process gone; recovery exhausted", "process")
+        mainHandler.removeCallbacks(bootWatchdogRunnable)
+        if (recreatesLeft <= 0 || totalRecreates >= maxLifetimeRecreates) {
+            // Budget checked BEFORE destroying: the exhausted state must keep a
+            // usable WebView — an in-flight host reload() would otherwise land
+            // on a destroyed instance.
+            BrowserPlugin.onLoadError(-1, "android", "$reason: recovery exhausted", "process")
             return
         }
+        (webView.parent as? ViewGroup)?.removeView(webView)
+        webView.destroy()
         recreatesLeft -= 1
+        totalRecreates += 1
         webView = WebView(this)
         findViewById<FrameLayout>(R.id.relativeLayout).addView(
             webView,
@@ -130,7 +193,7 @@ class WebViewActivity : AppCompatActivity() {
             )
         )
         configureWebView(webView)
-        BrowserPlugin.onWebViewReload() // recovery telemetry
+        BrowserPlugin.onWebViewReload(reason) // recovery telemetry
         loadPage()
     }
 
@@ -161,15 +224,33 @@ class WebViewActivity : AppCompatActivity() {
                 return false
             }
 
+            // A new navigation supersedes the previous document's pending
+            // checks and error state — without this, a stale probe can run
+            // against an error page (refilling the budget vacuously), and an
+            // uncommitted-navigation error (intent:// etc.) would misclassify
+            // the NEXT successful load as errored.
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                mainFrameErrored = false
+                mainHandler.removeCallbacks(stabilityRunnable)
+                mainHandler.removeCallbacks(bootWatchdogRunnable)
+            }
+
             // A successful load ends any transient-failure streak: tell the
             // host (resets its inline-retry budget) and arm the recreate-budget
             // refill, which only fires if this load stays up (recreateWebView
             // cancels it on a re-crash).
             override fun onPageFinished(view: WebView?, url: String?) {
-                if (isClosing) return
+                if (isClosing || mainFrameErrored) return
                 BrowserPlugin.onWebViewLoaded()
                 mainHandler.removeCallbacks(stabilityRunnable)
-                mainHandler.postDelayed(stabilityRunnable, stabilityWindowMs)
+                mainHandler.removeCallbacks(bootWatchdogRunnable)
+                bootProbeGraceUsed = false
+                val probeUrl = bootProbeUrl
+                if (bootProbeJs != null && probeUrl != null && url?.contains(probeUrl) == true) {
+                    mainHandler.postDelayed(bootWatchdogRunnable, bootWatchdogDelayMs)
+                } else {
+                    mainHandler.postDelayed(stabilityRunnable, stabilityWindowMs)
+                }
             }
 
             // Report main-frame load failures to the host (parity with iOS
@@ -180,6 +261,7 @@ class WebViewActivity : AppCompatActivity() {
                 error: WebResourceError?
             ) {
                 if (request?.isForMainFrame != true) return
+                mainFrameErrored = true
                 val code = error?.errorCode ?: 0
                 BrowserPlugin.onLoadError(
                     code,
@@ -207,6 +289,7 @@ class WebViewActivity : AppCompatActivity() {
         super.onDestroy()
         isClosing = true
         mainHandler.removeCallbacks(stabilityRunnable)
+        mainHandler.removeCallbacks(bootWatchdogRunnable)
         if (instance === this) instance = null
         BrowserPlugin.onFinish()
         finish()

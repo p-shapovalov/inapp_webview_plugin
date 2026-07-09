@@ -43,8 +43,8 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             )
         }
 
-        fun onWebViewReload() {
-            methodChannel?.invokeMethod("onWebViewReload", null)
+        fun onWebViewReload(reason: String) {
+            methodChannel?.invokeMethod("onWebViewReload", mapOf("reason" to reason))
         }
 
         fun onWebViewLoaded() {
@@ -115,6 +115,8 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     putExtra("color", color)
                     putExtra("invalidUrlRegex", invalidUrlRegex)
                     putExtra("headers", headers)
+                    putExtra("bootProbeJs", call.argument<String>("bootProbeJs"))
+                    putExtra("bootProbeUrl", call.argument<String>("bootProbeUrl"))
                 }
 
                 activity?.startActivityForResult(intent, 20)

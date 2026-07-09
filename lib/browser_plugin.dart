@@ -26,11 +26,26 @@ class BrowserPlugin {
     return _instance!;
   }
 
-  Future open(String url, {List<String>? invalidUrlRegex, Map<String, String>? headers, Color? color}) =>
+  /// [bootProbeJs]/[bootProbeUrl] arm the native SPA boot watchdog: on pages
+  /// whose URL contains [bootProbeUrl], [bootProbeJs] is evaluated ~12s after
+  /// load and must return 'ok' (booted), 'empty' (loaded but SPA never
+  /// rendered -> recreate) or 'none' (marker absent -> no action). Keeping the
+  /// contract here means the host that owns the page defines it once for both
+  /// platforms.
+  Future open(
+    String url, {
+    List<String>? invalidUrlRegex,
+    Map<String, String>? headers,
+    Color? color,
+    String? bootProbeJs,
+    String? bootProbeUrl,
+  }) =>
       _channel.invokeMethod('open', {
         'url': url,
         'headers': ?headers,
         'invalidUrlRegex': ?invalidUrlRegex,
+        'bootProbeJs': ?bootProbeJs,
+        'bootProbeUrl': ?bootProbeUrl,
         if (color != null) 'color': color.toARGB32()
       });
 
@@ -76,10 +91,10 @@ class BrowserPlugin {
   static VoidCallback? onTurnstileExpired;
   static Function(WebViewLoadError)? onLoadError;
 
-  /// Fired when the native layer had to reload the page to recover from a
-  /// WebView crash (iOS WebContent-process termination). Host can use it for
-  /// telemetry — the reload can silently re-enter/restart an in-flight survey.
-  static VoidCallback? onWebViewReload;
+  /// Fired when the native layer had to recreate/reload the page to recover.
+  /// Host can use it for telemetry — the reload silently re-enters the
+  /// in-flight survey (resumes via sessionId).
+  static Function(WebViewReloadReason reason)? onWebViewReload;
 
   /// Fired when a main-frame page load completes successfully (iOS didFinish /
   /// Android onPageFinished). Host uses it to reset consecutive-failure retry
@@ -113,13 +128,35 @@ class BrowserPlugin {
         ));
         break;
       case 'onWebViewReload':
-        onWebViewReload?.call();
+        final args = call.arguments as Map?;
+        onWebViewReload
+            ?.call(WebViewReloadReason.fromString(args?['reason'] as String?));
         break;
       case 'onWebViewLoaded':
         onWebViewLoaded?.call();
         break;
     }
   }
+}
+
+/// Why the native layer recreated the WebView. Emitted natively in TWO places
+/// that MUST be kept in sync with [fromString]: iOS
+/// `WebViewController.recreateWebView(reason:)` and Android
+/// `WebViewActivity.recreateWebView(reason)`.
+enum WebViewReloadReason {
+  /// WebContent/render-process death (crash, jetsam, foreground probe).
+  recreate,
+
+  /// Page loaded but the SPA never rendered into the boot-probe container.
+  bootWatchdog,
+
+  unknown;
+
+  static WebViewReloadReason fromString(String? raw) => switch (raw) {
+        'recreate' => WebViewReloadReason.recreate,
+        'boot-watchdog' => WebViewReloadReason.bootWatchdog,
+        _ => WebViewReloadReason.unknown,
+      };
 }
 
 /// Shared error-category vocabulary. The mapping from platform error codes to

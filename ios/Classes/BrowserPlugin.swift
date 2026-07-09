@@ -33,6 +33,8 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
             webViewController.url = url
             webViewController.color = color
             webViewController.headers = headers
+            webViewController.bootProbeJs = args["bootProbeJs"] as? String
+            webViewController.bootProbeUrl = args["bootProbeUrl"] as? String
             webViewController.invalidUrlRegex = invalidUrlRegex.map { try? NSRegularExpression(pattern: $0, options: .caseInsensitive) }
             
             rootViewController.pushViewController(webViewController, animated: true)
