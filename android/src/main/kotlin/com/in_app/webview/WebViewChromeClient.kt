@@ -51,6 +51,19 @@ internal class WebViewChromeClient(
         videoOutputFileUri = null
     }
 
+    // The client is reused across WebView recreates (see WebViewActivity
+    // chromeClient); a pending chooser belongs to the destroyed WebView, so
+    // its callback must be resolved (WebKit requires exactly one
+    // onReceiveValue) and the capture URIs dropped — otherwise the result
+    // would be delivered into the dead WebView, or a stale captured file
+    // could be mis-returned to a later chooser on the new WebView.
+    fun resetFileChooser() {
+        pickerCallback?.onReceiveValue(null)
+        pickerCallback = null
+        imageOutputFileUri = null
+        videoOutputFileUri = null
+    }
+
     override fun onShowFileChooser(
         webView: WebView, filePathCallback: ValueCallback<Array<Uri>>,
         fileChooserParams: FileChooserParams

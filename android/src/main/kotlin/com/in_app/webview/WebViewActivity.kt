@@ -69,6 +69,12 @@ class WebViewActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val stabilityRunnable = Runnable { recreatesLeft = maxRecreates }
     private val bootWatchdogRunnable = Runnable { probeSpaBoot() }
+    // Constructed once, at activity construction: the client's ctor registers
+    // an ActivityResult launcher, which AndroidX only allows before onStart —
+    // recreateWebView() must reuse this instance, since constructing a fresh
+    // client there crashed with "attempting to register while current state
+    // is RESUMED" (PV-APP-5TB and siblings).
+    private val chromeClient = WebViewChromeClient(this)
 
     fun reloadWebView() {
         runOnUiThread { if (!isClosing && ::webView.isInitialized) webView.reload() }
@@ -179,6 +185,7 @@ class WebViewActivity : AppCompatActivity() {
             BrowserPlugin.onLoadError(-1, "android", "$reason: recovery exhausted", "process")
             return
         }
+        chromeClient.resetFileChooser()
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
         recreatesLeft -= 1
@@ -204,7 +211,7 @@ class WebViewActivity : AppCompatActivity() {
         wv.settings.domStorageEnabled = true
         wv.settings.allowContentAccess = true
         wv.settings.allowFileAccess = true
-        wv.webChromeClient = WebViewChromeClient(this)
+        wv.webChromeClient = chromeClient
 
         wv.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
