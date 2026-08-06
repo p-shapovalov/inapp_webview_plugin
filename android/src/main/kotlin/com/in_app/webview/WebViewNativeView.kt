@@ -18,6 +18,8 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
 import androidx.core.net.toUri
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import io.flutter.plugins.nativeview.NativeView
 import java.util.regex.Pattern
 
@@ -154,6 +156,19 @@ class WebViewNativeView : NativeView() {
 
         container = TouchFocusLayout(activity) { webViewOrNull() }
         config?.color?.let { container.setBackgroundColor(it) }
+
+        // The native view fills the window (it is not laid out by Flutter), so
+        // nothing insets it for the status/navigation bars or the keyboard —
+        // the page would run under them. Pad the container instead of the
+        // WebView so the themed background still covers the inset area.
+        ViewCompat.setOnApplyWindowInsetsListener(container) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime()
+            )
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(container)
 
         webView = WebView(activity)
         container.addView(

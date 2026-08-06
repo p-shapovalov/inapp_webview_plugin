@@ -235,6 +235,15 @@ class _AndroidBrowserViewState
     super.dispose();
   }
 
+  // The base placeholder is a childless ColoredBox, which under the loose
+  // constraints a Scaffold body hands out collapses to zero size. That is
+  // invisible either way — the native view is what renders — but a zero-size
+  // box drops out of Flutter's hit test, so NativeViewOverlayBody never marks
+  // the pointer as landing on the native view and NativeViewOverlayApp claims
+  // every touch. Filling the available space is what makes taps reach the page.
+  @override
+  Widget build(BuildContext context) => const SizedBox.expand();
+
   @override
   Future<void> addNativeView() async {
     await BrowserPlugin.instance._channel

@@ -68,6 +68,9 @@ android {
 }
 
 dependencies {
+    // ViewCompat/WindowInsetsCompat (window insets on the native view) and
+    // FileProvider (chooser capture URIs).
+    implementation 'androidx.core:core-ktx:1.13.1'
     // TWA fast-path (LauncherActivity). The embedded WebView needs no
     // appcompat — it is no longer hosted by an AppCompatActivity.
     implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'

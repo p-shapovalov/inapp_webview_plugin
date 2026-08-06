@@ -92,7 +92,9 @@ Every `Scaffold` on a route that shows the webview needs a transparent backgroun
 
 ### Layout caveat
 
-The Android native view is hosted in a full-window container, so **it always fills the window** regardless of where `BrowserWebView` sits in the widget tree. Wrapping it in `SafeArea`/`Padding` insets the Flutter placeholder but not the page itself. On iOS the platform view is a real subview and does follow the Flutter layout. Position Flutter chrome as an overlay (`Stack`) rather than expecting it to displace the Android page.
+The Android native view is hosted in a full-window container, so **it always fills the window** regardless of where `BrowserWebView` sits in the widget tree. Wrapping it in `SafeArea`/`Padding` insets the Flutter placeholder but not the page itself — the native view applies system-bar and IME insets itself. On iOS the platform view is a real subview and does follow the Flutter layout, so `SafeArea` works there. Position Flutter chrome as an overlay (`Stack`) rather than expecting it to displace the Android page.
+
+`BrowserWebView` must be given bounded constraints that cover the area you want tappable. On Android its Flutter-side placeholder is what tells `NativeViewOverlayBody` a pointer landed on the page; if it collapses to zero size (a childless box under the loose constraints a `Scaffold` body hands out), every touch is claimed by Flutter and none reach the page.
 
 ## Native self-recovery
 
