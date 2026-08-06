@@ -23,7 +23,7 @@ import androidx.core.view.WindowInsetsCompat
 import io.flutter.plugins.nativeview.NativeView
 import java.util.regex.Pattern
 
-/** Per-webview configuration handed over from Dart via the `configure` call. */
+/** Handed over from Dart via the `configure` call. */
 class WebViewConfig(
     val url: String,
     val headers: HashMap<String, String>?,
@@ -34,31 +34,19 @@ class WebViewConfig(
 )
 
 /**
- * The survey WebView hosted below the transparent Flutter view by
- * flutter_native_view_android. The host activity must extend
- * NativeViewFlutterActivity and register this class under [VIEW_KEY]:
- *
- * ```
- * override fun onRegisterNativeViews() {
- *     registerNativeViewFactory(WebViewNativeView.VIEW_KEY) { WebViewNativeView() }
- * }
- * ```
- *
- * Because Flutter renders ON TOP of this view, dialogs and overlays no longer
- * require tearing the webview down — the recovery/watchdog logic ported from
- * the old WebViewActivity is unchanged.
+ * The survey WebView hosted below the transparent Flutter view. The host
+ * activity must extend NativeViewFlutterActivity and register this class under
+ * [VIEW_KEY]. Flutter renders on top, so dialogs no longer require tearing the
+ * webview down.
  */
 class WebViewNativeView : NativeView() {
     companion object {
         const val VIEW_KEY = "inapp_webview"
 
-        // The current live webview, so the plugin can reload it in place and
-        // route file-chooser activity results into its chrome client.
         var instance: WebViewNativeView? = null
 
-        // Staged by BrowserPlugin's `configure` call, consumed by the next
-        // onCreateView — the native-view factory protocol has no argument
-        // channel of its own.
+        // The native-view factory protocol has no argument channel, so the
+        // config is staged by `configure` and consumed by the next onCreateView.
         var pendingConfig: WebViewConfig? = null
     }
 
@@ -71,37 +59,27 @@ class WebViewNativeView : NativeView() {
     private var invalidUrlPatternList: List<Pattern>? = null
     private var isClosing = false
 
-    // Cap self-healing recreations so a genuinely-bad page can't loop. The
-    // budget is CONSECUTIVE, not lifetime: a page that loads and stays up for
-    // stabilityWindowMs (onPageFinished's stabilityRunnable) refills it, so a
-    // long survey survives well-spaced render kills; a tight crash-on-load loop
-    // recreates before the runnable fires and never refills.
+    // Consecutive, not lifetime: a load that stays up for stabilityWindowMs
+    // refills it, so a long survey survives well-spaced render kills while a
+    // crash-on-load loop recreates before the refill and gives up.
     private val maxRecreates = 2
     private val stabilityWindowMs = 10_000L
-    // The survey page HTML ships an EMPTY #survey-frame that the SPA renders
-    // into. If it is still empty this long after onPageFinished, the bundles
-    // never executed (edge asset failure / JS stall) — a "white page" no
-    // WebViewClient callback ever reports. Recreate under the same budget.
-    // On survey pages the recreate-budget refill is gated on the probe PASSING
-    // (not on a bare timer): a refill racing ahead of the probe would make the
-    // budget unexhaustible and a permanently-unbootable page would loop forever.
+    // A still-empty #survey-frame this long after onPageFinished means the
+    // bundles never executed — the white page no callback reports. The refill
+    // is gated on the probe passing, or an unbootable page would loop forever.
     private val bootWatchdogDelayMs = 12_000L
     private val bootProbeGraceDelayMs = 10_000L
-    // Consecutive budget refills make loops possible when the page keeps
-    // "recovering" (e.g. a partner page that render-crashes slower than the
-    // stability window) — the lifetime cap bounds them.
+    // Bounds a page that keeps "recovering" slower than the stability window.
     private val maxLifetimeRecreates = 10
-    // The CURRENT page load errored (set in onReceivedError, cleared when the
-    // next navigation starts): an errored onPageFinished must not count as a
-    // successful load — a reset retry budget on an error page loops the host's
-    // inline retry forever (seen in prod: 50 retry breadcrumbs all at attempt 1).
+    // An errored onPageFinished must not count as a successful load: a reset
+    // retry budget on an error page loops the host's inline retry forever
+    // (seen in prod — 50 retry breadcrumbs all at attempt 1).
     private var mainFrameErrored = false
     // Grace for an 'empty' probe result — one re-probe before recreating.
     private var bootProbeGraceUsed = false
-    // Reschedules spent waiting for an in-flight navigation. Tracked apart from
-    // bootProbeGraceUsed: a probe that never inspected the DOM must not consume
-    // the 'empty' grace, and bounding the waits separately keeps a page that
-    // loads forever from silently disarming the watchdog.
+    // Separate from bootProbeGraceUsed: a probe that never inspected the DOM
+    // must not spend the 'empty' grace, and bounding these keeps a
+    // forever-loading page from silently disarming the watchdog.
     private var bootProbeLoadingWaits = 0
     private val maxBootProbeLoadingWaits = 3
     private var totalRecreates = 0
@@ -110,9 +88,8 @@ class WebViewNativeView : NativeView() {
     private val stabilityRunnable = Runnable { recreatesLeft = maxRecreates }
     private val bootWatchdogRunnable = Runnable { probeSpaBoot() }
 
-    // WebView.reload() re-issues the request WITHOUT the additionalHttpHeaders
-    // of the original loadUrl, so a plain reload would drop the auth headers
-    // the survey needs. Re-load the current URL with them instead.
+    // WebView.reload() drops the additionalHttpHeaders of the original
+    // loadUrl, and the survey needs those auth headers.
     fun reloadWebView() {
         mainHandler.post {
             if (isClosing || !::webView.isInitialized) return@post
@@ -132,8 +109,7 @@ class WebViewNativeView : NativeView() {
                 onResult(null)
                 return@post
             }
-            // Results arrive JSON-encoded; unwrap the common string case so the
-            // Dart side sees what the script actually returned.
+            // Results arrive JSON-encoded; unwrap the common string case.
             webView.evaluateJavascript(js) { raw ->
                 onResult(if (raw == null || raw == "null") null else raw.trim('"'))
             }
@@ -144,8 +120,7 @@ class WebViewNativeView : NativeView() {
         return invalidUrlPatternList?.let { it.any { p -> p.matcher(url).find() } } ?: false
     }
 
-    // Map WebViewClient error codes onto the shared category vocabulary
-    // (network | tls | server | process | other) used by the iOS side.
+    // Shared vocabulary with the iOS side.
     private fun categoryFor(code: Int): String = when (code) {
         WebViewClient.ERROR_HOST_LOOKUP,
         WebViewClient.ERROR_CONNECT,
@@ -153,10 +128,9 @@ class WebViewNativeView : NativeView() {
         WebViewClient.ERROR_IO,
         WebViewClient.ERROR_PROXY_AUTHENTICATION -> "network"
         WebViewClient.ERROR_FAILED_SSL_HANDSHAKE -> "tls"
-        // ERROR_BAD_URL / ERROR_UNSUPPORTED_SCHEME / ERROR_FILE_NOT_FOUND are
-        // permanent: they stay 'other' so the host's isRecoverable retry does
-        // not loop on a URL that can never load. 'server' is reported from
-        // onReceivedHttpError, where a real 5xx is worth retrying.
+        // BAD_URL / UNSUPPORTED_SCHEME / FILE_NOT_FOUND are permanent, so they
+        // stay 'other' and the host cannot retry-loop on them. 'server' comes
+        // from onReceivedHttpError, where a 5xx is worth retrying.
         else -> "other"
     }
 
@@ -171,10 +145,9 @@ class WebViewNativeView : NativeView() {
         container = TouchFocusLayout(activity)
         config?.color?.let { container.setBackgroundColor(it) }
 
-        // The native view fills the window (it is not laid out by Flutter), so
-        // nothing insets it for the status/navigation bars or the keyboard —
-        // the page would run under them. Pad the container instead of the
-        // WebView so the themed background still covers the inset area.
+        // Flutter does not lay this view out, so nothing else insets it. Pad
+        // the container, not the WebView, so the themed background still
+        // covers the inset strip.
         ViewCompat.setOnApplyWindowInsetsListener(container) { v, insets ->
             val bars = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime()
@@ -206,9 +179,8 @@ class WebViewNativeView : NativeView() {
     private fun probeSpaBoot() {
         val probeJs = config?.bootProbeJs ?: return
         if (isClosing || !::webView.isInitialized) return
-        // A navigation in flight (e.g. the SPA's own reloaded=true recovery)
-        // means the DOM we'd probe is stale — wait rather than recreate (and
-        // thereby cancel) a legitimate load.
+        // A navigation in flight means the DOM is stale — waiting beats
+        // cancelling a legitimate load.
         if (webView.progress < 100) {
             if (bootProbeLoadingWaits < maxBootProbeLoadingWaits) {
                 bootProbeLoadingWaits += 1
@@ -216,9 +188,8 @@ class WebViewNativeView : NativeView() {
             }
             return
         }
-        // The completion can outlive a recreate; charging its verdict to the
-        // replacement would refill (or re-spend) the budget for a WebView the
-        // probe never ran against.
+        // The completion can outlive a recreate; its verdict must not be
+        // charged to a WebView the probe never ran against.
         val probed: WebView = webView
         probed.evaluateJavascript(probeJs) { result ->
             if (isClosing || !::webView.isInitialized || probed !== webView) {
@@ -238,28 +209,22 @@ class WebViewNativeView : NativeView() {
         }
     }
 
-    // Blank-page recovery: the render process was killed (onRenderProcessGone)
-    // or the SPA never booted (boot watchdog). Recreate the WebView and reload
-    // the URL (which carries sessionId, so the survey resumes server-side
-    // rather than restarting). Capped so a genuinely-bad page can't loop; on
-    // exhaustion, report a fatal load error so the host can surface its dialog.
+    // Blank-page recovery. The reloaded URL carries sessionId, so the survey
+    // resumes server-side rather than restarting.
     private fun recreateWebView(reason: String = "recreate") {
         if (isClosing) return
-        // A crash cancels any pending budget refill — only a load that survives
-        // the full stability window counts as recovered.
+        // Only a load that survives the full window counts as recovered.
         mainHandler.removeCallbacks(stabilityRunnable)
         mainHandler.removeCallbacks(bootWatchdogRunnable)
         if (recreatesLeft <= 0 || totalRecreates >= maxLifetimeRecreates) {
-            // Budget checked BEFORE destroying: the exhausted state must keep a
-            // usable WebView — an in-flight host reload() would otherwise land
-            // on a destroyed instance.
+            // Checked before destroying: an in-flight host reload() must not
+            // land on a destroyed instance.
             BrowserPlugin.onLoadError(-1, "android", "$reason: recovery exhausted", "process")
             return
         }
         chromeClient?.resetFileChooser()
-        // Detach the old instance before destroying it, so in-flight callbacks
-        // (and the clients it shares with the replacement) can't fire against a
-        // dead WebView — the counterpart of iOS's navigationDelegate = nil.
+        // Detached first so in-flight callbacks — and the clients it shares
+        // with the replacement — cannot fire against a dead WebView.
         val old = webView
         old.stopLoading()
         old.webChromeClient = null
@@ -289,9 +254,8 @@ class WebViewNativeView : NativeView() {
         wv.settings.domStorageEnabled = true
         wv.settings.allowContentAccess = true
         wv.settings.allowFileAccess = true
-        // The transparent FlutterView above shares the window and holds focus
-        // by default; the WebView only summons the IME for page text inputs
-        // when it can take focus itself (see TouchFocusLayout).
+        // The transparent FlutterView above holds focus by default, and the
+        // WebView only raises the IME when it can take focus itself.
         wv.isFocusable = true
         wv.isFocusableInTouchMode = true
         wv.webChromeClient = chromeClient
@@ -314,11 +278,9 @@ class WebViewNativeView : NativeView() {
                 return false
             }
 
-            // A new navigation supersedes the previous document's pending
-            // checks and error state — without this, a stale probe can run
-            // against an error page (refilling the budget vacuously), and an
-            // uncommitted-navigation error (intent:// etc.) would misclassify
-            // the NEXT successful load as errored.
+            // Without this a stale probe can refill the budget against an
+            // error page, and an uncommitted-navigation error (intent://)
+            // misclassifies the next successful load as errored.
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 mainFrameErrored = false
                 bootProbeLoadingWaits = 0
@@ -326,10 +288,8 @@ class WebViewNativeView : NativeView() {
                 mainHandler.removeCallbacks(bootWatchdogRunnable)
             }
 
-            // A successful load ends any transient-failure streak: tell the
-            // host (resets its inline-retry budget) and arm the recreate-budget
-            // refill, which only fires if this load stays up (recreateWebView
-            // cancels it on a re-crash).
+            // Arms the recreate-budget refill, which only fires if this load
+            // stays up — recreateWebView cancels it on a re-crash.
             override fun onPageFinished(view: WebView?, url: String?) {
                 if (isClosing || mainFrameErrored) return
                 BrowserPlugin.onWebViewLoaded()
@@ -345,8 +305,7 @@ class WebViewNativeView : NativeView() {
                 }
             }
 
-            // Report main-frame load failures to the host (parity with iOS
-            // notifyLoadError). Sub-resource errors are ignored to avoid noise.
+            // Sub-resource errors are ignored to avoid noise.
             override fun onReceivedError(
                 view: WebView?,
                 request: WebResourceRequest?,
@@ -363,11 +322,8 @@ class WebViewNativeView : NativeView() {
                 )
             }
 
-            // A main-frame HTTP failure never reaches onReceivedError — the
-            // response body loads and onPageFinished fires as if all was well.
-            // 5xx is the genuinely retryable 'server' case; report it and mark
-            // the load errored so the error body doesn't reset the host's
-            // retry budget.
+            // A main-frame HTTP failure never reaches onReceivedError: the
+            // error body loads and onPageFinished fires as if all was well.
             override fun onReceivedHttpError(
                 view: WebView?,
                 request: WebResourceRequest?,
@@ -385,9 +341,8 @@ class WebViewNativeView : NativeView() {
                 )
             }
 
-            // A render-process kill (OOM / system pressure) would crash the host
-            // app if unhandled. Recover in place by recreating the WebView;
-            // returning true keeps the app alive.
+            // Unhandled, a render-process kill takes the host app down;
+            // returning true keeps it alive.
             @RequiresApi(Build.VERSION_CODES.O)
             override fun onRenderProcessGone(
                 view: WebView?,
@@ -414,27 +369,21 @@ class WebViewNativeView : NativeView() {
 }
 
 /**
- * Container that moves focus to the WebView when a forwarded touch lands on
- * it. Touch events arrive synthetically (dispatched by the activity's gesture
- * handler, not the normal window traversal), so the framework's touch-mode
- * focus handoff never runs — without this, page text inputs get caret and taps
- * but no keyboard.
+ * Touches arrive synthetically from the activity's gesture handler, so the
+ * framework's touch-mode focus handoff never runs and page text inputs get a
+ * caret but no keyboard.
  *
- * Focus is taken on ACTION_UP rather than ACTION_DOWN. Flutter claims a pointer
- * over an async method-channel hop that can never beat the DOWN, so every tap
- * on Flutter UI above the page — including the exit dialog — is forwarded here
- * first; focusing on DOWN would pull focus off the FlutterView and break the
- * Flutter IME. A claim arrives as an ACTION_CANCEL, so a gesture that survives
- * to UP is one Flutter did not want. The WebView still sees the UP afterwards,
- * which is when it focuses the editable element and raises the keyboard.
+ * Focus is taken on ACTION_UP, not DOWN: Flutter claims a pointer over an async
+ * channel hop that can never beat the DOWN, so every tap on Flutter UI above
+ * the page is forwarded here first and focusing then would break the Flutter
+ * IME. A claim arrives as ACTION_CANCEL, so a gesture surviving to UP is one
+ * Flutter did not want.
  */
 private class TouchFocusLayout(context: Context) : FrameLayout(context) {
     private var gestureClaimedByFlutter = false
 
-    // The WebView is always child 0 — added on an empty container and
-    // re-inserted at 0 on recreate — so it can be read straight off the
-    // hierarchy rather than through a callback that would capture (and outlive
-    // with) the enclosing native view.
+    // Always child 0, so reading it off the hierarchy avoids a callback that
+    // would capture — and outlive with — the enclosing native view.
     private val webView: WebView? get() = getChildAt(0) as? WebView
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {

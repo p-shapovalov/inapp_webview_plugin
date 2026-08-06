@@ -15,14 +15,10 @@ class BrowserWebViewFactory: NSObject, FlutterPlatformViewFactory {
     }
 }
 
-/// The survey webview as a standard platform view: the WKWebView is composited
-/// inside the Flutter scene, so Flutter dialogs/routes render on top of the
-/// live page — no teardown needed to show an exit dialog. All recovery logic
-/// (recreate budget, SPA boot watchdog, foreground liveness probe) is ported
-/// unchanged from the pushed-view-controller implementation.
+/// The WKWebView is composited inside the Flutter scene, so Flutter renders on
+/// top of the live page and no teardown is needed to show a dialog.
 class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDelegate {
-    // The live instance, so the plugin's `reload` call can reach it. One
-    // webview at a time — same contract as the Dart side's static callbacks.
+    // One webview at a time — same contract as the Dart static callbacks.
     static weak var current: BrowserWebViewPlatformView?
 
     private let container: UIView
@@ -31,40 +27,29 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     private var headers: [String: String]?
     private var invalidUrlRegex: [NSRegularExpression?] = []
 
-    // Cap self-healing recreations so a genuinely-bad page (FB15670666, an iOS
-    // 18.x WebContent-process crash that recurs on the same page) can't loop.
-    // The budget is CONSECUTIVE, not lifetime: once a recreated page loads and
-    // stays up for stabilityWindow, didFinish's stabilityTimer refills it, so a
-    // long survey that hits well-spaced crashes keeps recovering. A tight loop
-    // (crash before the timer fires) never refills → gives up after maxRecreates.
+    // Bounds FB15670666, an iOS 18.x WebContent crash that recurs on the same
+    // page. Consecutive, not lifetime: a load that stays up for stabilityWindow
+    // refills it, a tight crash loop never does.
     private static let maxRecreates = 2
     private static let stabilityWindow: TimeInterval = 10
-    // SPA boot watchdog: bootProbeJs is supplied by the Dart host through the
-    // widget config together with bootProbeUrl (URL-substring gate), so the
-    // page contract lives in ONE place. The probe must return 'ok' (booted),
-    // 'empty' (loaded but SPA never rendered -> recreate) or 'none' (marker
-    // absent -> no action). On probed pages the recreate-budget refill is
-    // gated on 'ok' — a bare-timer refill would make the budget unexhaustible
-    // and a permanently-unbootable page would loop forever. A single 'empty'
-    // gets one grace re-probe before recreating (slow bundles on slow links).
+    // The refill is gated on the probe returning 'ok'; a bare-timer refill
+    // would make the budget unexhaustible and an unbootable page loop forever.
+    // One 'empty' gets a grace re-probe first, for slow bundles on slow links.
     private static let bootWatchdogDelay: TimeInterval = 12
     private static let bootProbeGraceDelay: TimeInterval = 10
-    // Consecutive budget refills make loops possible when the page keeps
-    // "recovering" (e.g. a partner page that render-crashes slower than the
-    // stability window) — the lifetime cap bounds them.
+    // Bounds a page that keeps "recovering" slower than the stability window.
     private static let maxLifetimeRecreates = 10
     private var bootProbeJs: String?
     private var bootProbeUrl: String?
     // Grace for an 'empty' probe result — one re-probe before recreating.
     private var bootProbeGraceUsed = false
-    // Reschedules spent waiting for an in-flight navigation. Tracked apart from
-    // bootProbeGraceUsed: a probe that never inspected the DOM must not consume
-    // the 'empty' grace, and bounding the waits separately keeps a page that
-    // loads forever from silently disarming the watchdog.
+    // Separate from bootProbeGraceUsed: a probe that never inspected the DOM
+    // must not spend the 'empty' grace, and bounding these keeps a
+    // forever-loading page from silently disarming the watchdog.
     private var bootProbeLoadingWaits = 0
     private static let maxBootProbeLoadingWaits = 3
-    // A main-frame HTTP failure still fires didFinish; without this the error
-    // body would report as a successful load.
+    // A main-frame 5xx still fires didFinish; without this the error body
+    // would report as a successful load.
     private var mainFrameHttpErrored = false
     private var totalRecreates = 0
     private var recreatesLeft = BrowserWebViewPlatformView.maxRecreates
@@ -72,8 +57,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     private var bootWatchdogTimer: Timer?
     private var hasLoaded = false
 
-    // Recreatable (not lazy): a jetsam'd WebContent process leaves a dead
-    // WKWebView that only a fresh instance can recover — see recreateWebView().
+    // Not lazy: a jetsam'd WebContent process leaves a dead WKWebView that
+    // only a fresh instance can recover.
     private var webView: WKWebView!
 
     init(frame: CGRect, args: [String: Any]) {
@@ -99,9 +84,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
 
         Self.current = self
 
-        // A backgrounded WKWebView is the #1 jetsam trigger and often does NOT
-        // fire webViewWebContentProcessDidTerminate — probe on foreground and
-        // recreate if the WebContent process is dead (blank-page recovery).
+        // A backgrounded WKWebView is the top jetsam trigger and often never
+        // fires webViewWebContentProcessDidTerminate.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(appWillEnterForeground),
@@ -114,9 +98,7 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     }
 
     deinit {
-        // Platform views have no explicit dispose hook on iOS — dealloc is the
-        // teardown. Stop in-flight loads and detach the delegate so callbacks
-        // racing disposal don't touch a dead instance.
+        // Platform views have no dispose hook on iOS; dealloc is the teardown.
         NotificationCenter.default.removeObserver(self)
         webView?.stopLoading()
         webView?.navigationDelegate = nil
@@ -155,10 +137,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
                        alpha: CGFloat((value & 0xFF000000) >> 24) / 0xFF)
     }
 
-    // Pin the current webView to the container edges. Safe-area insets are the
-    // Flutter widget's responsibility now that the webview is embedded — the
-    // host wraps BrowserWebView in SafeArea. Reused when recreateWebView()
-    // swaps in a fresh instance.
+    // Insets are the Flutter widget's responsibility now that the webview is
+    // embedded. Reused when recreateWebView() swaps in a fresh instance.
     private func attachWebView() {
         webView.translatesAutoresizingMaskIntoConstraints = false
         container.insertSubview(webView, at: 0)
@@ -172,10 +152,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
 
     @objc private func appWillEnterForeground() {
         guard hasLoaded else { return }
-        // A dead WebContent process fails JS eval; a live one returns a string.
-        // The identity guard drops stale completions: recreateWebView may have
-        // already swapped the instance by the time this fires (a single jetsam
-        // must charge the recreate budget once, not per pending completion).
+        // A dead WebContent process fails JS eval. The identity guard drops
+        // stale completions, so one jetsam charges the budget once.
         let probed: WKWebView = webView
         probed.evaluateJavaScript("document.readyState") { [weak self] _, error in
             guard let self, probed === self.webView else { return }
@@ -188,8 +166,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
             return
         }
         var request = URLRequest(url: url)
-        // Hidden until didFinish so the configured background color shows
-        // instead of a white flash.
+        // Hidden until didFinish, or a white flash shows instead of the
+        // configured background color.
         webView.isHidden = true
 
         if let headers {
@@ -204,15 +182,12 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webView.isHidden = false
         hasLoaded = true
-        // An error body finished loading is not a successful load — reporting
-        // it would reset the host's inline-retry budget on every retry.
+        // An error body finishing is not a successful load: reporting it would
+        // reset the host's inline-retry budget on every retry.
         guard !mainFrameHttpErrored else { return }
-        // Tell the host a load succeeded (host resets its transient-network
-        // inline-retry budget — see base_web_survey_page onWebViewLoaded).
         BrowserPlugin.methodChannel?.invokeMethod("onWebViewLoaded", arguments: nil)
-        // Refill the recreate budget only if this load STAYS up: a tight
-        // crash-on-load loop recreates before the timer fires (recreateWebView
-        // invalidates it), so it never refills; a stable load does.
+        // Refills only if this load stays up — recreateWebView invalidates the
+        // timer, so a crash-on-load loop never refills.
         stabilityTimer?.invalidate()
         bootWatchdogTimer?.invalidate()
         bootProbeGraceUsed = false
@@ -235,9 +210,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
 
     private func probeSpaBoot() {
         guard let probeJs = bootProbeJs else { return }
-        // A navigation in flight (e.g. the SPA's own reloaded=true recovery)
-        // means the DOM we'd probe is stale — wait rather than recreate (and
-        // thereby cancel) a legitimate load.
+        // A navigation in flight means the DOM is stale — waiting beats
+        // cancelling a legitimate load.
         if webView.isLoading {
             if bootProbeLoadingWaits < Self.maxBootProbeLoadingWaits {
                 bootProbeLoadingWaits += 1
@@ -265,8 +239,7 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         }
     }
 
-    // A new navigation supersedes any pending post-load check for the previous
-    // document — without this, a stale probe can run against an error page.
+    // Without this a stale probe can run against an error page.
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         mainFrameHttpErrored = false
         bootProbeLoadingWaits = 0
@@ -274,10 +247,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         bootWatchdogTimer?.invalidate()
     }
 
-    // A main-frame HTTP failure never surfaces as a navigation error — the
-    // response body loads and didFinish fires as if all was well. 5xx is the
-    // genuinely retryable 'server' case; report it and let the body render so
-    // the page can show its own error state.
+    // A main-frame HTTP failure never surfaces as a navigation error. The body
+    // is still allowed to render so the page can show its own error state.
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         if navigationResponse.isForMainFrame,
@@ -301,9 +272,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         notifyLoadError(error)
     }
 
-    // iOS 18.7.x WKWebView is more aggressive about provisional failures
-    // (TLS / DNS / ATS / connection drops). Without this, the webview stays
-    // hidden in loadPage() and the user sees only the background color.
+    // iOS 18.7.x is aggressive about provisional failures; without this the
+    // webview stays hidden and the user sees only the background color.
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         webView.isHidden = false
         stabilityTimer?.invalidate()
@@ -311,20 +281,15 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         notifyLoadError(error)
     }
 
-    // Open WebKit regression (FB15670666) on iOS 18.x — the WebContent process
-    // can be killed (memory pressure / backgrounding). reload() is unreliable
-    // once the process is dead, so recover by recreating the WKWebView.
+    // reload() is unreliable once the WebContent process is dead (FB15670666).
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         recreateWebView()
     }
 
-    // Blank-page recovery: swap in a fresh WKWebView and reload the URL (which
-    // carries sessionId, so the survey resumes server-side rather than
-    // restarting). Capped so a genuinely-bad page can't loop; on exhaustion,
-    // report a fatal load error so the host can surface its retry dialog.
+    // Blank-page recovery. The reloaded URL carries sessionId, so the survey
+    // resumes server-side rather than restarting.
     private func recreateWebView(reason: String = "recreate") {
-        // A crash cancels any pending budget refill — only a load that survives
-        // the full stabilityWindow counts as recovered.
+        // Only a load that survives the full window counts as recovered.
         stabilityTimer?.invalidate()
         bootWatchdogTimer?.invalidate()
         guard recreatesLeft > 0, totalRecreates < Self.maxLifetimeRecreates else {
@@ -346,8 +311,6 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         webView = makeWebView()
         applyColor(to: webView)
         attachWebView()
-        // Recovery telemetry — the recreate re-enters the survey (resumes via
-        // sessionId); the host logs it (see base_web_survey_page onWebViewReload).
         BrowserPlugin.methodChannel?.invokeMethod("onWebViewReload", arguments: [
             "reason": reason,
         ])
@@ -356,9 +319,7 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
 
     private func notifyLoadError(_ error: Error) {
         let ns = error as NSError
-        // -999 fires when we intentionally cancel a navigation in
-        // decidePolicyFor (deeplinks) — not a load failure the caller should
-        // react to.
+        // -999 is our own deeplink cancellation, not a load failure.
         if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled {
             return
         }
@@ -383,10 +344,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
              NSURLErrorCallIsActive,
              NSURLErrorDataNotAllowed:
             return "network"
-        // NSURLErrorBadURL / NSURLErrorUnsupportedURL are permanent and stay
-        // 'other', so the host's isRecoverable retry does not loop on a URL
-        // that can never load. Real HTTP 5xx is reported from
-        // decidePolicyFor navigationResponse.
+        // BadURL / UnsupportedURL are permanent, so they stay 'other' and the
+        // host cannot retry-loop on them.
         case NSURLErrorBadServerResponse,
              NSURLErrorZeroByteResource,
              NSURLErrorRedirectToNonExistentLocation:
@@ -433,9 +392,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     }
 
     private func checkPattern(_ regex: NSRegularExpression?, _ url: String) -> Bool {
-        // NSRegularExpression ranges are UTF-16 offsets; String.count counts
-        // characters, so a non-ASCII URL would be searched only up to a
-        // truncated prefix and a deeplink past it would not be intercepted.
+        // UTF-16 offsets: String.count would truncate the search range on a
+        // non-ASCII URL and miss a deeplink past it.
         let match = regex?.firstMatch(
             in: url,
             options: [],
@@ -457,10 +415,7 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         }
     }
 
-    // Reload the survey page IN PLACE to recover from a transient load failure
-    // (e.g. an iOS 18.x provisional network failure) without tearing the survey
-    // down. Reloads the current page, or re-loads the original URL if the
-    // provisional load never committed.
+    // Falls back to the original URL when the provisional load never committed.
     func reload() {
         webView.isHidden = true
         if let current = webView.url, !current.absoluteString.isEmpty {

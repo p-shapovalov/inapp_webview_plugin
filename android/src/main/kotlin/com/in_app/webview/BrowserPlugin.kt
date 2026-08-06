@@ -16,10 +16,8 @@ import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.common.PluginRegistry
 
 /**
- * Control channel for the embedded webview ([WebViewNativeView]) plus the TWA
- * fast-path. The webview itself is created by the host activity's native-view
- * factory (flutter_native_view_android); `configure` stages the per-open
- * config the factory has no argument channel for.
+ * Control channel for the embedded webview plus the TWA fast-path. The webview
+ * itself is created by the host activity's native-view factory.
  */
 class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     PluginRegistry.ActivityResultListener {
@@ -75,10 +73,8 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activityBinding = binding
-        // File-chooser results (WebViewChromeClient launches pickers with
-        // startActivityForResult) come back through the plugin binding — the
-        // host activity is a plain FlutterActivity, no ComponentActivity
-        // launcher registration involved.
+        // Chooser results come back here rather than through a
+        // ComponentActivity launcher — the host is a plain FlutterActivity.
         binding.addActivityResultListener(this)
 
         flutterPluginBinding?.binaryMessenger?.let {
@@ -120,8 +116,7 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                     url = url,
                     headers = call.argument<HashMap<String, String>>("headers"),
                     invalidUrlRegex = call.argument<List<String>>("invalidUrlRegex"),
-                    // ARGB with a full alpha byte overflows Int32, so the
-                    // codec delivers it as a Long.
+                    // A full alpha byte overflows Int32, so the codec sends Long.
                     color = (call.argument<Any>("color") as? Number)?.toInt(),
                     bootProbeJs = call.argument<String>("bootProbeJs"),
                     bootProbeUrl = call.argument<String>("bootProbeUrl"),

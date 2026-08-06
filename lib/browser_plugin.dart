@@ -11,9 +11,8 @@ import 'package:flutter_native_view_android/flutter_native_view_android.dart';
 /// (see `BrowserPlugin.register`).
 const String browserWebViewType = 'inapp_webview';
 
-/// Wraps the host app so touches landing on Flutter UI are not forwarded to a
-/// webview hosted below it. Required on Android — without it every touch is
-/// forwarded to the page — and a passthrough everywhere else, so hosts do not
+/// Claims touches landing on Flutter UI so they are not forwarded to a webview
+/// hosted below it. Required on Android, a passthrough elsewhere — hosts do not
 /// have to know which platform composites the webview how.
 class BrowserOverlayApp extends StatelessWidget {
   const BrowserOverlayApp({super.key, required this.child});
@@ -22,19 +21,13 @@ class BrowserOverlayApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Platform.isAndroid
-      // Constant for the process: the wrapper must never toggle, or the app
-      // below it would be torn down and rebuilt when it did.
+      // Constant per process: toggling this would rebuild the app below it.
       ? NativeViewOverlayApp(enabled: true, child: child)
       : child;
 }
 
-/// Control channel + event callbacks for the embedded webview.
-///
-/// The webview itself is embedded with [BrowserWebView]; this class carries
-/// everything that is not tied to a widget: in-place [reload], the TWA
-/// fast-path, and the event callbacks fired by the native layer. Callbacks are
-/// static single-slot (one live webview at a time) — same contract as the
-/// pre-embedded plugin.
+/// Everything about the embedded webview that is not tied to the widget.
+/// Callbacks are static single-slot — one live webview at a time.
 class BrowserPlugin {
   static BrowserPlugin? _instance;
   final MethodChannel _channel;
@@ -76,14 +69,9 @@ class BrowserPlugin {
   /// transient load failure without restarting/closing the survey.
   Future reload() => _channel.invokeMethod('reload');
 
-  /// Evaluates [js] in the live page and returns its result as a string.
-  ///
-  /// The app→page direction of the bus. Page→app messaging stays deeplink
-  /// interception; this exists so the host can hand something to a page that
-  /// is already loaded, instead of navigating to say it.
-  ///
-  /// Returns null when there is no live webview (nothing embedded yet, or a
-  /// TWA owns the survey) or the script threw.
+  /// The app→page direction of the bus: hands something to a page that is
+  /// already loaded, instead of navigating to say it. Null when no live
+  /// webview is reachable (nothing embedded, or a TWA) or the script threw.
   Future<String?> evaluateJavascript(String js) =>
       _channel.invokeMethod<String>('evaluateJavascript', {'js': js});
 
@@ -127,27 +115,20 @@ class BrowserPlugin {
   }
 }
 
-/// The embedded in-app webview.
+/// The embedded in-app webview: a platform view on iOS, a native view below
+/// the transparent Flutter view on Android. Either way Flutter UI renders on
+/// top of the live page, so no teardown is needed to show a dialog.
 ///
-/// iOS: a standard platform view (WKWebView composited inside the Flutter
-/// scene). Android: a native WebView hosted *below* the transparent Flutter
-/// view by `flutter_native_view_android` — the host activity must extend
-/// `NativeViewFlutterActivity` and register `WebViewNativeView` under
-/// [browserWebViewType], and the app must be wrapped in [NativeViewOverlayApp]
-/// with this widget's subtree wrapped in [NativeViewOverlayBody].
+/// The Android host activity must extend `NativeViewFlutterActivity` and
+/// register `WebViewNativeView` under [browserWebViewType], and wrap the app
+/// in [BrowserOverlayApp].
 ///
-/// In both embeddings Flutter UI (dialogs, routes, overlays) renders on top of
-/// the live webview — no teardown needed to show an exit dialog.
-///
-/// Changing [url] rebuilds the webview from scratch, which is what the previous
-/// `open()` call did. The remaining properties are create-time only.
+/// Changing [url] rebuilds the webview; the rest is create-time only.
 ///
 /// [bootProbeJs]/[bootProbeUrl] arm the native SPA boot watchdog: on pages
 /// whose URL contains [bootProbeUrl], [bootProbeJs] is evaluated ~12s after
-/// load and must return 'ok' (booted), 'empty' (loaded but SPA never
-/// rendered -> recreate) or 'none' (marker absent -> no action). Keeping the
-/// contract here means the host that owns the page defines it once for both
-/// platforms.
+/// load and must return 'ok', 'empty' (never rendered -> recreate) or 'none'.
+/// Defining it here keeps the page contract in one place for both platforms.
 class BrowserWebView extends StatelessWidget {
   const BrowserWebView({
     super.key,
@@ -161,9 +142,8 @@ class BrowserWebView extends StatelessWidget {
 
   final String url;
 
-  /// Navigations matching any of these regexes are cancelled natively and
-  /// reported through [BrowserPlugin.onNavigationCancel] — the deeplink IPC
-  /// bus between the page and the host app.
+  /// Cancelled natively and reported through
+  /// [BrowserPlugin.onNavigationCancel] — the page→app bus.
   final List<String>? invalidUrlRegex;
 
   /// Extra headers for the initial request only.
@@ -193,9 +173,8 @@ class BrowserWebView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (Platform.isAndroid) {
-      // Marks the area as the native view's, so pointers landing here are not
-      // claimed by [BrowserOverlayApp]. Pairing this with the widget itself is
-      // what keeps a host from silently losing every touch by omitting it.
+      // Paired here, not left to the host: omitting it loses every touch,
+      // silently.
       return NativeViewOverlayBody(
         enabled: true,
         child: _AndroidBrowserView(url: url, config: _config),
@@ -215,14 +194,10 @@ class BrowserWebView extends StatelessWidget {
   }
 }
 
-/// Android embedding: a transparent placeholder whose lifecycle drives the
-/// native view below the Flutter layer. The config must reach the native side
-/// before the view is instantiated, hence the configure-then-add override.
-///
-/// A URL change is handled in place rather than by keying the widget: every
-/// instance shares one native view key, so a keyed swap could add the new view
-/// before the outgoing element removed the old one — and the removal would
-/// then tear down the view that just replaced it.
+/// A placeholder whose lifecycle drives the native view below the Flutter
+/// layer. A URL change is handled in place rather than by keying the widget:
+/// all instances share one native view key, so a keyed swap could add the
+/// replacement before the outgoing element removes the old one.
 class _AndroidBrowserView extends NativeViewWidget {
   const _AndroidBrowserView({required this.url, required this.config});
 
@@ -238,17 +213,13 @@ class _AndroidBrowserView extends NativeViewWidget {
 
 class _AndroidBrowserViewState
     extends NativeViewWidgetState<_AndroidBrowserView> {
-  // Every instance addresses the same native view key, and the native side
-  // treats a repeat add as a no-op: a second live webview would silently adopt
-  // the first one's page, and the first one's disposal would then tear down
-  // the view the second is showing. Two co-mounted instances — a
-  // pushReplacement between pages, say — are a usage error, not a layout the
-  // native side can express.
+  // A repeat add is a native no-op, so a second live webview would adopt the
+  // first one's page and be torn down by the first one's disposal. Debug-only:
+  // nothing outside the assert reads this.
   static int _liveInstances = 0;
 
   @override
   void initState() {
-    // Debug-only bookkeeping: nothing outside the assert reads the count.
     assert(() {
       assert(
         _liveInstances == 0,
@@ -271,12 +242,9 @@ class _AndroidBrowserViewState
     super.dispose();
   }
 
-  // The base placeholder is a childless ColoredBox, which under the loose
-  // constraints a Scaffold body hands out collapses to zero size. That is
-  // invisible either way — the native view is what renders — but a zero-size
-  // box drops out of Flutter's hit test, so NativeViewOverlayBody never marks
-  // the pointer as landing on the native view and NativeViewOverlayApp claims
-  // every touch. Filling the available space is what makes taps reach the page.
+  // The base placeholder is a childless ColoredBox, which collapses to zero
+  // size under loose constraints and so drops out of the hit test — every
+  // touch then gets claimed by Flutter and none reach the page.
   @override
   Widget build(BuildContext context) => const SizedBox.expand();
 
@@ -301,10 +269,9 @@ class _AndroidBrowserViewState
   }
 }
 
-/// Why the native layer recreated the WebView. Emitted natively in TWO places
-/// that MUST be kept in sync with [fromString]: iOS
-/// `BrowserWebViewPlatformView.recreateWebView(reason:)` and Android
-/// `WebViewNativeView.recreateWebView(reason)`.
+/// Emitted natively in two places that must stay in sync with [fromString]:
+/// `BrowserWebViewPlatformView.recreateWebView` and
+/// `WebViewNativeView.recreateWebView`.
 enum WebViewReloadReason {
   /// WebContent/render-process death (crash, jetsam, foreground probe).
   recreate,
@@ -321,10 +288,9 @@ enum WebViewReloadReason {
       };
 }
 
-/// Shared error-category vocabulary. The mapping from platform error codes to
-/// these values is implemented natively in TWO places that MUST be kept in sync
-/// with this enum: iOS `BrowserWebViewPlatformView.errorCategory(for:)` and
-/// Android `WebViewNativeView.categoryFor(code:)`.
+/// Mapped from platform error codes natively in two places that must stay in
+/// sync with this enum: `BrowserWebViewPlatformView.errorCategory(for:)` and
+/// `WebViewNativeView.categoryFor(code:)`.
 enum WebViewLoadErrorCategory {
   network,
   server,
@@ -340,10 +306,8 @@ enum WebViewLoadErrorCategory {
         _ => WebViewLoadErrorCategory.other,
       };
 
-  /// Transient failures worth an in-place reload. `process` (WebContent-process
-  /// give-up) and `other` are NOT recoverable this way — by the time the native
-  /// layer reports `process` it has already exhausted its own crash-recovery
-  /// reloads.
+  /// Worth an in-place reload. `process` is excluded: by the time it is
+  /// reported the native layer has spent its own crash-recovery reloads.
   bool get isRecoverable => this == network || this == tls || this == server;
 }
 

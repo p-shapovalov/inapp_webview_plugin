@@ -31,10 +31,8 @@ internal class WebViewChromeClient(
 
     private var pickerCallback: ValueCallback<Array<Uri>>? = null
 
-    // Chooser results are delivered by BrowserPlugin's ActivityResultListener
-    // (the host is a plain FlutterActivity — no ComponentActivity launcher
-    // registration, which also removes the register-while-RESUMED crash class
-    // the old launcher-based client had to work around).
+    // Delivered by BrowserPlugin's ActivityResultListener; no ComponentActivity
+    // launcher, so the register-while-RESUMED crash class is gone with it.
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode != FILE_CHOOSER_REQUEST_CODE) return false
         finishChooser(
@@ -43,8 +41,7 @@ internal class WebViewChromeClient(
         return true
     }
 
-    // WebKit requires exactly one onReceiveValue per chooser, and the capture
-    // URIs must not outlive it.
+    // WebKit requires exactly one onReceiveValue per chooser.
     private fun finishChooser(results: Array<Uri>?) {
         pickerCallback?.onReceiveValue(results)
         pickerCallback = null
@@ -52,12 +49,9 @@ internal class WebViewChromeClient(
         videoOutputFileUri = null
     }
 
-    // The client is reused across WebView recreates (see WebViewNativeView
-    // chromeClient); a pending chooser belongs to the destroyed WebView, so
-    // its callback must be resolved (WebKit requires exactly one
-    // onReceiveValue) and the capture URIs dropped — otherwise the result
-    // would be delivered into the dead WebView, or a stale captured file
-    // could be mis-returned to a later chooser on the new WebView.
+    // The client outlives a WebView recreate, so a pending chooser must be
+    // resolved and its capture URIs dropped — otherwise the result lands in
+    // the dead WebView, or a stale file is returned to a later chooser.
     fun resetFileChooser() = finishChooser(null)
 
     override fun onShowFileChooser(
