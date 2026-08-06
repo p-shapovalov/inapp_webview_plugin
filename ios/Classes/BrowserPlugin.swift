@@ -9,7 +9,7 @@ public class BrowserPlugin: NSObject, FlutterPlugin {
         let channel = FlutterMethodChannel(name: "inapp_webview_channel", binaryMessenger: registrar.messenger())
         let instance = BrowserPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
-        registrar.register(BrowserWebViewFactory(), withId: "inapp_webview")
+        registrar.register(BrowserWebViewFactory(), withId: BrowserWebViewFactory.viewType)
 
         methodChannel = channel
     }

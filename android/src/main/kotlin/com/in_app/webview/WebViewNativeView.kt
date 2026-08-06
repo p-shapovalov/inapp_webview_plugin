@@ -168,7 +168,7 @@ class WebViewNativeView : NativeView() {
         invalidUrlPatternList = config?.invalidUrlRegex?.map { Pattern.compile(it) }
         chromeClient = WebViewChromeClient(activity)
 
-        container = TouchFocusLayout(activity) { webViewOrNull() }
+        container = TouchFocusLayout(activity)
         config?.color?.let { container.setBackgroundColor(it) }
 
         // The native view fills the window (it is not laid out by Flutter), so
@@ -196,8 +196,6 @@ class WebViewNativeView : NativeView() {
         loadPage()
         return container
     }
-
-    private fun webViewOrNull(): WebView? = if (::webView.isInitialized) webView else null
 
     private fun loadPage() {
         val c = config ?: return
@@ -430,11 +428,14 @@ class WebViewNativeView : NativeView() {
  * to UP is one Flutter did not want. The WebView still sees the UP afterwards,
  * which is when it focuses the editable element and raises the keyboard.
  */
-private class TouchFocusLayout(
-    context: Context,
-    private val webView: () -> WebView?,
-) : FrameLayout(context) {
+private class TouchFocusLayout(context: Context) : FrameLayout(context) {
     private var gestureClaimedByFlutter = false
+
+    // The WebView is always child 0 — added on an empty container and
+    // re-inserted at 0 on recreate — so it can be read straight off the
+    // hierarchy rather than through a callback that would capture (and outlive
+    // with) the enclosing native view.
+    private val webView: WebView? get() = getChildAt(0) as? WebView
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         when (ev.actionMasked) {
@@ -442,7 +443,7 @@ private class TouchFocusLayout(
             MotionEvent.ACTION_CANCEL -> gestureClaimedByFlutter = true
             MotionEvent.ACTION_UP ->
                 if (!gestureClaimedByFlutter) {
-                    webView()?.let { if (!it.hasFocus()) it.requestFocus() }
+                    webView?.let { if (!it.hasFocus()) it.requestFocus() }
                 }
         }
         return super.dispatchTouchEvent(ev)

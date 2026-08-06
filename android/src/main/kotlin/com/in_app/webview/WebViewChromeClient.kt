@@ -37,19 +37,19 @@ internal class WebViewChromeClient(
     // the old launcher-based client had to work around).
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode != FILE_CHOOSER_REQUEST_CODE) return false
+        finishChooser(
+            if (resultCode == Activity.RESULT_OK) getSelectedFiles(data, resultCode) else null
+        )
+        return true
+    }
 
-        if (pickerCallback != null) {
-            var results: Array<Uri>? = null
-            if (resultCode == Activity.RESULT_OK) {
-                results = getSelectedFiles(data, resultCode)
-            }
-            pickerCallback!!.onReceiveValue(results)
-        }
-
+    // WebKit requires exactly one onReceiveValue per chooser, and the capture
+    // URIs must not outlive it.
+    private fun finishChooser(results: Array<Uri>?) {
+        pickerCallback?.onReceiveValue(results)
         pickerCallback = null
         imageOutputFileUri = null
         videoOutputFileUri = null
-        return true
     }
 
     // The client is reused across WebView recreates (see WebViewNativeView
@@ -58,12 +58,7 @@ internal class WebViewChromeClient(
     // onReceiveValue) and the capture URIs dropped — otherwise the result
     // would be delivered into the dead WebView, or a stale captured file
     // could be mis-returned to a later chooser on the new WebView.
-    fun resetFileChooser() {
-        pickerCallback?.onReceiveValue(null)
-        pickerCallback = null
-        imageOutputFileUri = null
-        videoOutputFileUri = null
-    }
+    fun resetFileChooser() = finishChooser(null)
 
     override fun onShowFileChooser(
         webView: WebView, filePathCallback: ValueCallback<Array<Uri>>,

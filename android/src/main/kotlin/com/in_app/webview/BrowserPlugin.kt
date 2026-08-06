@@ -54,8 +54,8 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         }
     }
 
-    private var activity: Activity? = null
     private var activityBinding: ActivityPluginBinding? = null
+    private val activity: Activity? get() = activityBinding?.activity
 
     private fun initPlugin(binaryMessenger: BinaryMessenger) {
         methodChannel = MethodChannel(binaryMessenger, CHANNEL)
@@ -74,7 +74,6 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-        activity = binding.activity
         activityBinding = binding
         // File-chooser results (WebViewChromeClient launches pickers with
         // startActivityForResult) come back through the plugin binding — the
@@ -88,23 +87,21 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
         }
     }
 
-    override fun onDetachedFromActivityForConfigChanges() {
-        activityBinding?.removeActivityResultListener(this)
-        activityBinding = null
-        activity = null
-    }
+    override fun onDetachedFromActivityForConfigChanges() = detachActivity()
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        activity = binding.activity
         activityBinding = binding
         binding.addActivityResultListener(this)
     }
 
     override fun onDetachedFromActivity() {
+        detachActivity()
+        methodChannel = null
+    }
+
+    private fun detachActivity() {
         activityBinding?.removeActivityResultListener(this)
         activityBinding = null
-        activity = null
-        methodChannel = null
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean =

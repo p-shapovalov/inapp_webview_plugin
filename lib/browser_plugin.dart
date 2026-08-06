@@ -6,16 +6,27 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_native_view_android/flutter_native_view_android.dart';
 
-// Host apps need the overlay wrappers to route gestures around the Android
-// native view; re-exported so they don't have to depend on the package
-// directly.
-export 'package:flutter_native_view_android/flutter_native_view_android.dart'
-    show NativeViewOverlayApp, NativeViewOverlayBody;
-
 /// Identity shared with the native side: the Android native-view factory key
 /// (see `WebViewNativeView.VIEW_KEY`) and the iOS platform-view type
 /// (see `BrowserPlugin.register`).
 const String browserWebViewType = 'inapp_webview';
+
+/// Wraps the host app so touches landing on Flutter UI are not forwarded to a
+/// webview hosted below it. Required on Android — without it every touch is
+/// forwarded to the page — and a passthrough everywhere else, so hosts do not
+/// have to know which platform composites the webview how.
+class BrowserOverlayApp extends StatelessWidget {
+  const BrowserOverlayApp({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Platform.isAndroid
+      // Constant for the process: the wrapper must never toggle, or the app
+      // below it would be torn down and rebuilt when it did.
+      ? NativeViewOverlayApp(enabled: true, child: child)
+      : child;
+}
 
 /// Control channel + event callbacks for the embedded webview.
 ///
@@ -173,10 +184,22 @@ class BrowserWebView extends StatelessWidget {
         if (color != null) 'color': color!.toARGB32(),
       };
 
+  // The webview must win the gesture arena immediately — otherwise scroll
+  // gestures inside the page compete with Flutter scrollables.
+  static const _gestureRecognizers = <Factory<OneSequenceGestureRecognizer>>{
+    Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new),
+  };
+
   @override
   Widget build(BuildContext context) {
     if (Platform.isAndroid) {
-      return _AndroidBrowserView(config: _config);
+      // Marks the area as the native view's, so pointers landing here are not
+      // claimed by [BrowserOverlayApp]. Pairing this with the widget itself is
+      // what keeps a host from silently losing every touch by omitting it.
+      return NativeViewOverlayBody(
+        enabled: true,
+        child: _AndroidBrowserView(url: url, config: _config),
+      );
     }
     return UiKitView(
       // creationParams are create-time, so a new URL must mint a new platform
@@ -187,11 +210,7 @@ class BrowserWebView extends StatelessWidget {
       layoutDirection: TextDirection.ltr,
       creationParams: _config,
       creationParamsCodec: const StandardMessageCodec(),
-      // The webview must win the gesture arena immediately — otherwise scroll
-      // gestures inside the page compete with Flutter scrollables.
-      gestureRecognizers: {
-        Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new),
-      },
+      gestureRecognizers: _gestureRecognizers,
     );
   }
 }
@@ -205,11 +224,10 @@ class BrowserWebView extends StatelessWidget {
 /// before the outgoing element removed the old one — and the removal would
 /// then tear down the view that just replaced it.
 class _AndroidBrowserView extends NativeViewWidget {
-  const _AndroidBrowserView({required this.config});
+  const _AndroidBrowserView({required this.url, required this.config});
 
+  final String url;
   final Map<String, dynamic> config;
-
-  String get url => config['url'] as String;
 
   @override
   String get viewKey => browserWebViewType;
@@ -230,19 +248,26 @@ class _AndroidBrowserViewState
 
   @override
   void initState() {
-    assert(
-      _liveInstances == 0,
-      'Only one BrowserWebView can be mounted at a time on Android: all '
-      'instances share the native view key "$browserWebViewType". Unmount the '
-      'previous one before mounting another, or change its url in place.',
-    );
-    _liveInstances++;
+    // Debug-only bookkeeping: nothing outside the assert reads the count.
+    assert(() {
+      assert(
+        _liveInstances == 0,
+        'Only one BrowserWebView can be mounted at a time on Android: all '
+        'instances share the native view key "$browserWebViewType". Unmount '
+        'the previous one before mounting another, or change its url in place.',
+      );
+      _liveInstances++;
+      return true;
+    }());
     super.initState();
   }
 
   @override
   void dispose() {
-    _liveInstances--;
+    assert(() {
+      _liveInstances--;
+      return true;
+    }());
     super.dispose();
   }
 

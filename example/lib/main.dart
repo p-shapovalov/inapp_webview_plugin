@@ -15,8 +15,7 @@ class MyApp extends StatelessWidget {
     // Claims pointers that land on Flutter UI so they are not forwarded to the
     // Android native view below. No-op on iOS, where the webview is a regular
     // platform view.
-    return NativeViewOverlayApp(
-      enabled: Platform.isAndroid,
+    return BrowserOverlayApp(
       child: MaterialApp(
         theme: ThemeData(brightness: Brightness.dark),
         home: const HomePage(),
@@ -97,14 +96,11 @@ class _SurveyPageState extends State<SurveyPage> {
       // The Android native view sits below the Flutter layer, so the scaffold
       // must not paint over it.
       backgroundColor: Platform.isAndroid ? Colors.transparent : null,
-      body: SafeArea(
-        child: NativeViewOverlayBody(
-          enabled: Platform.isAndroid,
-          child: const BrowserWebView(
-            url: 'https://jonathanbcsouza.github.io/Advanced_WebView/',
-            invalidUrlRegex: ['paidviewpoint'],
-            color: Colors.blue,
-          ),
+      body: const SafeArea(
+        child: BrowserWebView(
+          url: 'https://jonathanbcsouza.github.io/Advanced_WebView/',
+          invalidUrlRegex: ['paidviewpoint'],
+          color: Colors.blue,
         ),
       ),
     );

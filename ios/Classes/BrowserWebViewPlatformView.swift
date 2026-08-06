@@ -3,6 +3,9 @@ import UIKit
 import WebKit
 
 class BrowserWebViewFactory: NSObject, FlutterPlatformViewFactory {
+    // Must match browserWebViewType in Dart and WebViewNativeView.VIEW_KEY.
+    static let viewType = "inapp_webview"
+
     func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
         FlutterStandardMessageCodec.sharedInstance()
     }
@@ -67,7 +70,6 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     private var recreatesLeft = BrowserWebViewPlatformView.maxRecreates
     private var stabilityTimer: Timer?
     private var bootWatchdogTimer: Timer?
-    private var isClosing = false
     private var hasLoaded = false
 
     // Recreatable (not lazy): a jetsam'd WebContent process leaves a dead
@@ -115,7 +117,6 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         // Platform views have no explicit dispose hook on iOS — dealloc is the
         // teardown. Stop in-flight loads and detach the delegate so callbacks
         // racing disposal don't touch a dead instance.
-        isClosing = true
         NotificationCenter.default.removeObserver(self)
         webView?.stopLoading()
         webView?.navigationDelegate = nil
@@ -170,7 +171,7 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     }
 
     @objc private func appWillEnterForeground() {
-        guard !isClosing, hasLoaded else { return }
+        guard hasLoaded else { return }
         // A dead WebContent process fails JS eval; a live one returns a string.
         // The identity guard drops stale completions: recreateWebView may have
         // already swapped the instance by the time this fires (a single jetsam
@@ -233,7 +234,7 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     }
 
     private func probeSpaBoot() {
-        guard !isClosing, let probeJs = bootProbeJs else { return }
+        guard let probeJs = bootProbeJs else { return }
         // A navigation in flight (e.g. the SPA's own reloaded=true recovery)
         // means the DOM we'd probe is stale — wait rather than recreate (and
         // thereby cancel) a legitimate load.
@@ -246,7 +247,7 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         }
         let probed: WKWebView = webView
         probed.evaluateJavaScript(probeJs) { [weak self] result, error in
-            guard let self, probed === self.webView, !self.isClosing else { return }
+            guard let self, probed === self.webView else { return }
             if error != nil { return } // dead process -> didTerminate/foreground probe own it
             switch result as? String {
             case "ok":
@@ -322,7 +323,6 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     // restarting). Capped so a genuinely-bad page can't loop; on exhaustion,
     // report a fatal load error so the host can surface its retry dialog.
     private func recreateWebView(reason: String = "recreate") {
-        guard !isClosing else { return }
         // A crash cancels any pending budget refill — only a load that survives
         // the full stabilityWindow counts as recovered.
         stabilityTimer?.invalidate()
@@ -443,12 +443,8 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         return match != nil
     }
 
-    // Reload the survey page IN PLACE to recover from a transient load failure
-    // (e.g. an iOS 18.x provisional network failure) without tearing the survey
-    // down. Reloads the current page, or re-loads the original URL if the
-    // provisional load never committed.
     func evaluate(_ js: String, completion: @escaping (String?) -> Void) {
-        guard !isClosing, let webView else {
+        guard let webView else {
             completion(nil)
             return
         }
@@ -461,6 +457,10 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
         }
     }
 
+    // Reload the survey page IN PLACE to recover from a transient load failure
+    // (e.g. an iOS 18.x provisional network failure) without tearing the survey
+    // down. Reloads the current page, or re-loads the original URL if the
+    // provisional load never committed.
     func reload() {
         webView.isHidden = true
         if let current = webView.url, !current.absoluteString.isEmpty {

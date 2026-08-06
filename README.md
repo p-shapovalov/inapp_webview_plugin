@@ -12,8 +12,7 @@ The page↔app protocol is navigation interception: URLs matching `invalidUrlReg
 ## Usage
 
 ```dart
-NativeViewOverlayApp(            // claims pointers landing on Flutter UI (Android)
-  enabled: Platform.isAndroid,
+BrowserOverlayApp(               // claims pointers landing on Flutter UI (Android)
   child: MaterialApp(home: SurveyPage()),
 );
 
@@ -21,22 +20,19 @@ NativeViewOverlayApp(            // claims pointers landing on Flutter UI (Andro
 Scaffold(
   backgroundColor: Platform.isAndroid ? Colors.transparent : null,
   body: SafeArea(
-    child: NativeViewOverlayBody(
-      enabled: Platform.isAndroid,
-      child: BrowserWebView(
-        url: url,
-        headers: headers,
-        invalidUrlRegex: ['myapp://', 'https://other.host'],
-        color: Colors.blue,
-        bootProbeJs: probeJs,
-        bootProbeUrl: '/mobile/survey',
-      ),
+    child: BrowserWebView(
+      url: url,
+      headers: headers,
+      invalidUrlRegex: ['myapp://', 'https://other.host'],
+      color: Colors.blue,
+      bootProbeJs: probeJs,
+      bootProbeUrl: '/mobile/survey',
     ),
   ),
 );
 ```
 
-Configuration is create-time: to load a different page, rebuild `BrowserWebView` with a new `Key`.
+Changing `url` loads the new page; the other properties are create-time. Do not key a `BrowserWebView` to force a reload — on Android all instances share one native view key, so a keyed swap can add the replacement before the outgoing one is removed.
 
 ### Events and control
 
@@ -94,7 +90,7 @@ Every `Scaffold` on a route that shows the webview needs a transparent backgroun
 
 The Android native view is hosted in a full-window container, so **it always fills the window** regardless of where `BrowserWebView` sits in the widget tree. Wrapping it in `SafeArea`/`Padding` insets the Flutter placeholder but not the page itself — the native view applies system-bar and IME insets itself. On iOS the platform view is a real subview and does follow the Flutter layout, so `SafeArea` works there. Position Flutter chrome as an overlay (`Stack`) rather than expecting it to displace the Android page.
 
-`BrowserWebView` must be given bounded constraints that cover the area you want tappable. On Android its Flutter-side placeholder is what tells `NativeViewOverlayBody` a pointer landed on the page; if it collapses to zero size (a childless box under the loose constraints a `Scaffold` body hands out), every touch is claimed by Flutter and none reach the page.
+`BrowserWebView` must be given bounded constraints that cover the area you want tappable. On Android its Flutter-side placeholder is what marks a pointer as landing on the page; if it collapses to zero size (a childless box under the loose constraints a `Scaffold` body hands out), every touch is claimed by Flutter and none reach the page.
 
 ## Native self-recovery
 
@@ -110,5 +106,5 @@ Ported unchanged from the pre-embedding implementation and identical across plat
 - Cookies use the platform store (`WKWebsiteDataStore.default()` / Android `CookieManager`); they are not synced with the host's HTTP client. Session continuity relies on the URL and the initial request headers.
 - `headers` apply to the initial request only.
 - `mailto:` links are opened externally.
-- No JavaScript bridge is exposed — page→app messaging is deeplink interception.
+- Page→app messaging is deeplink interception; `evaluateJavascript` is the app→page direction, for handing something to a page that is already loaded.
 - File chooser and camera capture are Android-only, driven by the page's `<input type="file">`.
