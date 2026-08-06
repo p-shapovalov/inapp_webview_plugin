@@ -101,7 +101,7 @@ Ported unchanged from the pre-embedding implementation and identical across plat
 - **Recreate budget** — a killed render/WebContent process (or a failed boot probe) swaps in a fresh WebView and reloads the URL. The budget is consecutive (refilled by a load that stays up for 10s) and bounded by a lifetime cap of 10.
 - **SPA boot watchdog** — on pages whose URL contains `bootProbeUrl`, `bootProbeJs` runs ~12s after load and must return `ok` / `empty` / `none`. An `empty` result gets one grace re-probe, then recreates. This catches "white page" stalls no load callback ever reports.
 - **Foreground liveness probe (iOS)** — a backgrounded `WKWebView` is the top jetsam trigger and often never fires `didTerminate`; a failing JS eval on foreground triggers recreation.
-- **Error categories** — `network` / `server` / `tls` / `process` / `other`, mapped natively on both platforms. `isRecoverable` marks the ones worth an in-place `reload()`.
+- **Error categories** — `network` / `server` / `tls` / `process` / `other`, mapped natively on both platforms. `isRecoverable` marks the ones worth an in-place `reload()`; permanently-bad URLs stay `other` so the host cannot retry-loop on them. `server` means a main-frame HTTP 5xx, which is reported from `onReceivedHttpError` / `decidePolicyFor navigationResponse` — the response body is still allowed to render so the page can show its own error state.
 
 ## Notes
 

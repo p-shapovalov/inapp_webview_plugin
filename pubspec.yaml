@@ -18,6 +18,7 @@ dependencies:
   flutter_native_view_android:
     git:
       url: https://github.com/p-shapovalov/flutter_native_view_android
+      ref: 1ce6fa576527ce87de84519c1ee84d1f288c1a8c
 
 dev_dependencies:
   flutter_test:

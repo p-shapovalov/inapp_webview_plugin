@@ -52,7 +52,17 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     private static let maxLifetimeRecreates = 10
     private var bootProbeJs: String?
     private var bootProbeUrl: String?
+    // Grace for an 'empty' probe result — one re-probe before recreating.
     private var bootProbeGraceUsed = false
+    // Reschedules spent waiting for an in-flight navigation. Tracked apart from
+    // bootProbeGraceUsed: a probe that never inspected the DOM must not consume
+    // the 'empty' grace, and bounding the waits separately keeps a page that
+    // loads forever from silently disarming the watchdog.
+    private var bootProbeLoadingWaits = 0
+    private static let maxBootProbeLoadingWaits = 3
+    // A main-frame HTTP failure still fires didFinish; without this the error
+    // body would report as a successful load.
+    private var mainFrameHttpErrored = false
     private var totalRecreates = 0
     private var recreatesLeft = BrowserWebViewPlatformView.maxRecreates
     private var stabilityTimer: Timer?
@@ -193,6 +203,9 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         webView.isHidden = false
         hasLoaded = true
+        // An error body finished loading is not a successful load — reporting
+        // it would reset the host's inline-retry budget on every retry.
+        guard !mainFrameHttpErrored else { return }
         // Tell the host a load succeeded (host resets its transient-network
         // inline-retry budget — see base_web_survey_page onWebViewLoaded).
         BrowserPlugin.methodChannel?.invokeMethod("onWebViewLoaded", arguments: nil)
@@ -222,11 +235,11 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     private func probeSpaBoot() {
         guard !isClosing, let probeJs = bootProbeJs else { return }
         // A navigation in flight (e.g. the SPA's own reloaded=true recovery)
-        // means the DOM we'd probe is stale — give it one grace period instead
-        // of recreating (and thereby cancelling) a legitimate load.
+        // means the DOM we'd probe is stale — wait rather than recreate (and
+        // thereby cancel) a legitimate load.
         if webView.isLoading {
-            if !bootProbeGraceUsed {
-                bootProbeGraceUsed = true
+            if bootProbeLoadingWaits < Self.maxBootProbeLoadingWaits {
+                bootProbeLoadingWaits += 1
                 scheduleBootProbe(after: Self.bootProbeGraceDelay)
             }
             return
@@ -254,8 +267,30 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     // A new navigation supersedes any pending post-load check for the previous
     // document — without this, a stale probe can run against an error page.
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        mainFrameHttpErrored = false
+        bootProbeLoadingWaits = 0
         stabilityTimer?.invalidate()
         bootWatchdogTimer?.invalidate()
+    }
+
+    // A main-frame HTTP failure never surfaces as a navigation error — the
+    // response body loads and didFinish fires as if all was well. 5xx is the
+    // genuinely retryable 'server' case; report it and let the body render so
+    // the page can show its own error state.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if navigationResponse.isForMainFrame,
+           let http = navigationResponse.response as? HTTPURLResponse,
+           http.statusCode >= 500 {
+            mainFrameHttpErrored = true
+            BrowserPlugin.methodChannel?.invokeMethod("onLoadError", arguments: [
+                "code": http.statusCode,
+                "domain": "HTTP",
+                "message": HTTPURLResponse.localizedString(forStatusCode: http.statusCode),
+                "category": "server",
+            ])
+        }
+        decisionHandler(.allow)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -348,11 +383,13 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
              NSURLErrorCallIsActive,
              NSURLErrorDataNotAllowed:
             return "network"
+        // NSURLErrorBadURL / NSURLErrorUnsupportedURL are permanent and stay
+        // 'other', so the host's isRecoverable retry does not loop on a URL
+        // that can never load. Real HTTP 5xx is reported from
+        // decidePolicyFor navigationResponse.
         case NSURLErrorBadServerResponse,
              NSURLErrorZeroByteResource,
-             NSURLErrorRedirectToNonExistentLocation,
-             NSURLErrorBadURL,
-             NSURLErrorUnsupportedURL:
+             NSURLErrorRedirectToNonExistentLocation:
             return "server"
         case NSURLErrorServerCertificateHasBadDate,
              NSURLErrorServerCertificateUntrusted,
@@ -396,10 +433,13 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     }
 
     private func checkPattern(_ regex: NSRegularExpression?, _ url: String) -> Bool {
+        // NSRegularExpression ranges are UTF-16 offsets; String.count counts
+        // characters, so a non-ASCII URL would be searched only up to a
+        // truncated prefix and a deeplink past it would not be intercepted.
         let match = regex?.firstMatch(
             in: url,
             options: [],
-            range: NSRange(location: 0, length: url.count))
+            range: NSRange(location: 0, length: url.utf16.count))
         return match != nil
     }
 

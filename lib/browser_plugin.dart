@@ -209,6 +209,32 @@ class _AndroidBrowserView extends NativeViewWidget {
 
 class _AndroidBrowserViewState
     extends NativeViewWidgetState<_AndroidBrowserView> {
+  // Every instance addresses the same native view key, and the native side
+  // treats a repeat add as a no-op: a second live webview would silently adopt
+  // the first one's page, and the first one's disposal would then tear down
+  // the view the second is showing. Two co-mounted instances — a
+  // pushReplacement between pages, say — are a usage error, not a layout the
+  // native side can express.
+  static int _liveInstances = 0;
+
+  @override
+  void initState() {
+    assert(
+      _liveInstances == 0,
+      'Only one BrowserWebView can be mounted at a time on Android: all '
+      'instances share the native view key "$browserWebViewType". Unmount the '
+      'previous one before mounting another, or change its url in place.',
+    );
+    _liveInstances++;
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    _liveInstances--;
+    super.dispose();
+  }
+
   @override
   Future<void> addNativeView() async {
     await BrowserPlugin.instance._channel

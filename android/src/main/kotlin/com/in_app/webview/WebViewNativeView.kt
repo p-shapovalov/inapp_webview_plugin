@@ -94,15 +94,34 @@ class WebViewNativeView : NativeView() {
     // successful load — a reset retry budget on an error page loops the host's
     // inline retry forever (seen in prod: 50 retry breadcrumbs all at attempt 1).
     private var mainFrameErrored = false
+    // Grace for an 'empty' probe result — one re-probe before recreating.
     private var bootProbeGraceUsed = false
+    // Reschedules spent waiting for an in-flight navigation. Tracked apart from
+    // bootProbeGraceUsed: a probe that never inspected the DOM must not consume
+    // the 'empty' grace, and bounding the waits separately keeps a page that
+    // loads forever from silently disarming the watchdog.
+    private var bootProbeLoadingWaits = 0
+    private val maxBootProbeLoadingWaits = 3
     private var totalRecreates = 0
     private var recreatesLeft = maxRecreates
     private val mainHandler = Handler(Looper.getMainLooper())
     private val stabilityRunnable = Runnable { recreatesLeft = maxRecreates }
     private val bootWatchdogRunnable = Runnable { probeSpaBoot() }
 
+    // WebView.reload() re-issues the request WITHOUT the additionalHttpHeaders
+    // of the original loadUrl, so a plain reload would drop the auth headers
+    // the survey needs. Re-load the current URL with them instead.
     fun reloadWebView() {
-        mainHandler.post { if (!isClosing && ::webView.isInitialized) webView.reload() }
+        mainHandler.post {
+            if (isClosing || !::webView.isInitialized) return@post
+            val headers = config?.headers
+            val current = webView.url
+            when {
+                current == null -> loadPage()
+                headers != null -> webView.loadUrl(current, headers)
+                else -> webView.reload()
+            }
+        }
     }
 
     private fun checkUrl(url: String): Boolean {
@@ -118,9 +137,10 @@ class WebViewNativeView : NativeView() {
         WebViewClient.ERROR_IO,
         WebViewClient.ERROR_PROXY_AUTHENTICATION -> "network"
         WebViewClient.ERROR_FAILED_SSL_HANDSHAKE -> "tls"
-        WebViewClient.ERROR_BAD_URL,
-        WebViewClient.ERROR_UNSUPPORTED_SCHEME,
-        WebViewClient.ERROR_FILE_NOT_FOUND -> "server"
+        // ERROR_BAD_URL / ERROR_UNSUPPORTED_SCHEME / ERROR_FILE_NOT_FOUND are
+        // permanent: they stay 'other' so the host's isRecoverable retry does
+        // not loop on a URL that can never load. 'server' is reported from
+        // onReceivedHttpError, where a real 5xx is worth retrying.
         else -> "other"
     }
 
@@ -160,17 +180,23 @@ class WebViewNativeView : NativeView() {
         val probeJs = config?.bootProbeJs ?: return
         if (isClosing || !::webView.isInitialized) return
         // A navigation in flight (e.g. the SPA's own reloaded=true recovery)
-        // means the DOM we'd probe is stale — give it one grace period instead
-        // of recreating (and thereby cancelling) a legitimate load.
+        // means the DOM we'd probe is stale — wait rather than recreate (and
+        // thereby cancel) a legitimate load.
         if (webView.progress < 100) {
-            if (!bootProbeGraceUsed) {
-                bootProbeGraceUsed = true
+            if (bootProbeLoadingWaits < maxBootProbeLoadingWaits) {
+                bootProbeLoadingWaits += 1
                 mainHandler.postDelayed(bootWatchdogRunnable, bootProbeGraceDelayMs)
             }
             return
         }
-        webView.evaluateJavascript(probeJs) { result ->
-            if (isClosing || !::webView.isInitialized) return@evaluateJavascript
+        // The completion can outlive a recreate; charging its verdict to the
+        // replacement would refill (or re-spend) the budget for a WebView the
+        // probe never ran against.
+        val probed: WebView = webView
+        probed.evaluateJavascript(probeJs) { result ->
+            if (isClosing || !::webView.isInitialized || probed !== webView) {
+                return@evaluateJavascript
+            }
             when (result?.trim('"')) {
                 "ok" -> recreatesLeft = maxRecreates
                 "empty" ->
@@ -204,8 +230,15 @@ class WebViewNativeView : NativeView() {
             return
         }
         chromeClient?.resetFileChooser()
-        (webView.parent as? ViewGroup)?.removeView(webView)
-        webView.destroy()
+        // Detach the old instance before destroying it, so in-flight callbacks
+        // (and the clients it shares with the replacement) can't fire against a
+        // dead WebView — the counterpart of iOS's navigationDelegate = nil.
+        val old = webView
+        old.stopLoading()
+        old.webChromeClient = null
+        old.webViewClient = WebViewClient()
+        (old.parent as? ViewGroup)?.removeView(old)
+        old.destroy()
         recreatesLeft -= 1
         totalRecreates += 1
         webView = WebView(container.context)
@@ -261,6 +294,7 @@ class WebViewNativeView : NativeView() {
             // the NEXT successful load as errored.
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 mainFrameErrored = false
+                bootProbeLoadingWaits = 0
                 mainHandler.removeCallbacks(stabilityRunnable)
                 mainHandler.removeCallbacks(bootWatchdogRunnable)
             }
@@ -275,6 +309,7 @@ class WebViewNativeView : NativeView() {
                 mainHandler.removeCallbacks(stabilityRunnable)
                 mainHandler.removeCallbacks(bootWatchdogRunnable)
                 bootProbeGraceUsed = false
+                bootProbeLoadingWaits = 0
                 val probeUrl = config?.bootProbeUrl
                 if (config?.bootProbeJs != null && probeUrl != null && url?.contains(probeUrl) == true) {
                     mainHandler.postDelayed(bootWatchdogRunnable, bootWatchdogDelayMs)
@@ -298,6 +333,28 @@ class WebViewNativeView : NativeView() {
                     "android",
                     error?.description?.toString() ?: "",
                     categoryFor(code)
+                )
+            }
+
+            // A main-frame HTTP failure never reaches onReceivedError — the
+            // response body loads and onPageFinished fires as if all was well.
+            // 5xx is the genuinely retryable 'server' case; report it and mark
+            // the load errored so the error body doesn't reset the host's
+            // retry budget.
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                errorResponse: android.webkit.WebResourceResponse?
+            ) {
+                if (request?.isForMainFrame != true) return
+                val status = errorResponse?.statusCode ?: return
+                if (status < 500) return
+                mainFrameErrored = true
+                BrowserPlugin.onLoadError(
+                    status,
+                    "android",
+                    errorResponse.reasonPhrase ?: "HTTP $status",
+                    "server"
                 )
             }
 
@@ -332,17 +389,32 @@ class WebViewNativeView : NativeView() {
 /**
  * Container that moves focus to the WebView when a forwarded touch lands on
  * it. Touch events arrive synthetically (dispatched by the activity's gesture
- * handler, not the normal window traversal), so the framework's
- * touch-mode focus handoff never runs — without this, page text inputs get
- * caret and taps but no keyboard.
+ * handler, not the normal window traversal), so the framework's touch-mode
+ * focus handoff never runs — without this, page text inputs get caret and taps
+ * but no keyboard.
+ *
+ * Focus is taken on ACTION_UP rather than ACTION_DOWN. Flutter claims a pointer
+ * over an async method-channel hop that can never beat the DOWN, so every tap
+ * on Flutter UI above the page — including the exit dialog — is forwarded here
+ * first; focusing on DOWN would pull focus off the FlutterView and break the
+ * Flutter IME. A claim arrives as an ACTION_CANCEL, so a gesture that survives
+ * to UP is one Flutter did not want. The WebView still sees the UP afterwards,
+ * which is when it focuses the editable element and raises the keyboard.
  */
 private class TouchFocusLayout(
     context: Context,
     private val webView: () -> WebView?,
 ) : FrameLayout(context) {
+    private var gestureClaimedByFlutter = false
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
-            webView()?.let { if (!it.hasFocus()) it.requestFocus() }
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> gestureClaimedByFlutter = false
+            MotionEvent.ACTION_CANCEL -> gestureClaimedByFlutter = true
+            MotionEvent.ACTION_UP ->
+                if (!gestureClaimedByFlutter) {
+                    webView()?.let { if (!it.hasFocus()) it.requestFocus() }
+                }
         }
         return super.dispatchTouchEvent(ev)
     }

@@ -94,7 +94,7 @@ packages:
     dependency: transitive
     description:
       path: "."
-      ref: HEAD
+      ref: "1ce6fa576527ce87de84519c1ee84d1f288c1a8c"
       resolved-ref: "1ce6fa576527ce87de84519c1ee84d1f288c1a8c"
       url: "https://github.com/p-shapovalov/flutter_native_view_android"
     source: git
