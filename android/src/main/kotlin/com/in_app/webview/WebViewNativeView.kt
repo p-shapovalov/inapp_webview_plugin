@@ -1,11 +1,14 @@
 package com.in_app.webview
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceError
@@ -14,24 +17,56 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.net.toUri
+import io.flutter.plugins.nativeview.NativeView
 import java.util.regex.Pattern
 
+/** Per-webview configuration handed over from Dart via the `configure` call. */
+class WebViewConfig(
+    val url: String,
+    val headers: HashMap<String, String>?,
+    val invalidUrlRegex: List<String>?,
+    val color: Int?,
+    val bootProbeJs: String?,
+    val bootProbeUrl: String?,
+)
 
-class WebViewActivity : AppCompatActivity() {
+/**
+ * The survey WebView hosted below the transparent Flutter view by
+ * flutter_native_view_android. The host activity must extend
+ * NativeViewFlutterActivity and register this class under [VIEW_KEY]:
+ *
+ * ```
+ * override fun onRegisterNativeViews() {
+ *     registerNativeViewFactory(WebViewNativeView.VIEW_KEY) { WebViewNativeView() }
+ * }
+ * ```
+ *
+ * Because Flutter renders ON TOP of this view, dialogs and overlays no longer
+ * require tearing the webview down — the recovery/watchdog logic ported from
+ * the old WebViewActivity is unchanged.
+ */
+class WebViewNativeView : NativeView() {
     companion object {
-        // The current live survey WebView activity, so the plugin can reload it
-        // in place (recover from a transient load error without tearing down).
-        var instance: WebViewActivity? = null
+        const val VIEW_KEY = "inapp_webview"
+
+        // The current live webview, so the plugin can reload it in place and
+        // route file-chooser activity results into its chrome client.
+        var instance: WebViewNativeView? = null
+
+        // Staged by BrowserPlugin's `configure` call, consumed by the next
+        // onCreateView — the native-view factory protocol has no argument
+        // channel of its own.
+        var pendingConfig: WebViewConfig? = null
     }
 
+    private lateinit var container: FrameLayout
     private lateinit var webView: WebView
+    internal var chromeClient: WebViewChromeClient? = null
+        private set
 
+    private var config: WebViewConfig? = null
     private var invalidUrlPatternList: List<Pattern>? = null
-    private var pageUrl: String? = null
-    private var pageHeaders: HashMap<String, String>? = null
-    private var bgColor: Int? = null
     private var isClosing = false
 
     // Cap self-healing recreations so a genuinely-bad page can't loop. The
@@ -59,33 +94,19 @@ class WebViewActivity : AppCompatActivity() {
     // successful load — a reset retry budget on an error page loops the host's
     // inline retry forever (seen in prod: 50 retry breadcrumbs all at attempt 1).
     private var mainFrameErrored = false
-    // SPA boot-probe contract supplied by the Dart host via open() — see
-    // browser_plugin.dart `open(bootProbeJs:, bootProbeUrl:)`.
-    private var bootProbeJs: String? = null
-    private var bootProbeUrl: String? = null
     private var bootProbeGraceUsed = false
     private var totalRecreates = 0
     private var recreatesLeft = maxRecreates
     private val mainHandler = Handler(Looper.getMainLooper())
     private val stabilityRunnable = Runnable { recreatesLeft = maxRecreates }
     private val bootWatchdogRunnable = Runnable { probeSpaBoot() }
-    // Constructed once, at activity construction: the client's ctor registers
-    // an ActivityResult launcher, which AndroidX only allows before onStart —
-    // recreateWebView() must reuse this instance, since constructing a fresh
-    // client there crashed with "attempting to register while current state
-    // is RESUMED" (PV-APP-5TB and siblings).
-    private val chromeClient = WebViewChromeClient(this)
 
     fun reloadWebView() {
-        runOnUiThread { if (!isClosing && ::webView.isInitialized) webView.reload() }
+        mainHandler.post { if (!isClosing && ::webView.isInitialized) webView.reload() }
     }
 
     private fun checkUrl(url: String): Boolean {
-        return invalidUrlPatternList?.let { it.any { p -> checkPattern(p, url) } } ?: false
-    }
-
-    private fun checkPattern(p: Pattern, url: String): Boolean {
-        return p.matcher(url).find()
+        return invalidUrlPatternList?.let { it.any { p -> p.matcher(url).find() } } ?: false
     }
 
     // Map WebViewClient error codes onto the shared category vocabulary
@@ -103,43 +124,40 @@ class WebViewActivity : AppCompatActivity() {
         else -> "other"
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        setContentView(R.layout.webview_activity)
-        webView = findViewById(R.id.webview)
+    override fun onCreateView(): View {
+        val activity = getContext() as Activity
         instance = this
-        val layout = findViewById<FrameLayout>(R.id.relativeLayout)
-        val extras = intent.extras ?: return
-        val url = extras.getString("url")
-        pageHeaders = intent.getSerializableExtra("headers") as HashMap<String, String>?
+        config = pendingConfig
+        pendingConfig = null
+        invalidUrlPatternList = config?.invalidUrlRegex?.map { Pattern.compile(it) }
+        chromeClient = WebViewChromeClient(activity)
 
-        bgColor = extras.getLong("color").toInt()
-        bgColor?.let { layout.setBackgroundColor(it) }
+        container = TouchFocusLayout(activity) { webViewOrNull() }
+        config?.color?.let { container.setBackgroundColor(it) }
 
-        invalidUrlPatternList =
-            intent.getStringArrayExtra("invalidUrlRegex")?.map { Pattern.compile(it) }
-        bootProbeJs = extras.getString("bootProbeJs")
-        bootProbeUrl = extras.getString("bootProbeUrl")
-
-        if (url == null) {
-            finish()
-            return
-        }
-        pageUrl = url
-
+        webView = WebView(activity)
+        container.addView(
+            webView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
         configureWebView(webView)
         loadPage()
+        return container
     }
 
+    private fun webViewOrNull(): WebView? = if (::webView.isInitialized) webView else null
+
     private fun loadPage() {
-        val u = pageUrl ?: return
+        val c = config ?: return
         mainFrameErrored = false
-        pageHeaders?.let { webView.loadUrl(u, it) } ?: webView.loadUrl(u)
+        c.headers?.let { webView.loadUrl(c.url, it) } ?: webView.loadUrl(c.url)
     }
 
     private fun probeSpaBoot() {
-        val probeJs = bootProbeJs ?: return
+        val probeJs = config?.bootProbeJs ?: return
         if (isClosing || !::webView.isInitialized) return
         // A navigation in flight (e.g. the SPA's own reloaded=true recovery)
         // means the DOM we'd probe is stale — give it one grace period instead
@@ -185,13 +203,13 @@ class WebViewActivity : AppCompatActivity() {
             BrowserPlugin.onLoadError(-1, "android", "$reason: recovery exhausted", "process")
             return
         }
-        chromeClient.resetFileChooser()
+        chromeClient?.resetFileChooser()
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
         recreatesLeft -= 1
         totalRecreates += 1
-        webView = WebView(this)
-        findViewById<FrameLayout>(R.id.relativeLayout).addView(
+        webView = WebView(container.context)
+        container.addView(
             webView,
             0,
             FrameLayout.LayoutParams(
@@ -206,11 +224,16 @@ class WebViewActivity : AppCompatActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun configureWebView(wv: WebView) {
-        bgColor?.let { wv.setBackgroundColor(it) }
+        config?.color?.let { wv.setBackgroundColor(it) }
         wv.settings.javaScriptEnabled = true
         wv.settings.domStorageEnabled = true
         wv.settings.allowContentAccess = true
         wv.settings.allowFileAccess = true
+        // The transparent FlutterView above shares the window and holds focus
+        // by default; the WebView only summons the IME for page text inputs
+        // when it can take focus itself (see TouchFocusLayout).
+        wv.isFocusable = true
+        wv.isFocusableInTouchMode = true
         wv.webChromeClient = chromeClient
 
         wv.webViewClient = object : WebViewClient() {
@@ -221,7 +244,7 @@ class WebViewActivity : AppCompatActivity() {
                 val newUrl = request?.url.toString()
 
                 if (newUrl.startsWith("mailto:")) {
-                    startActivity(Intent(Intent.ACTION_VIEW, newUrl.toUri()))
+                    container.context.startActivity(Intent(Intent.ACTION_VIEW, newUrl.toUri()))
                     return true
                 } else if (checkUrl(newUrl)) {
                     BrowserPlugin.onNavigationCancel(newUrl)
@@ -252,8 +275,8 @@ class WebViewActivity : AppCompatActivity() {
                 mainHandler.removeCallbacks(stabilityRunnable)
                 mainHandler.removeCallbacks(bootWatchdogRunnable)
                 bootProbeGraceUsed = false
-                val probeUrl = bootProbeUrl
-                if (bootProbeJs != null && probeUrl != null && url?.contains(probeUrl) == true) {
+                val probeUrl = config?.bootProbeUrl
+                if (config?.bootProbeJs != null && probeUrl != null && url?.contains(probeUrl) == true) {
                     mainHandler.postDelayed(bootWatchdogRunnable, bootWatchdogDelayMs)
                 } else {
                     mainHandler.postDelayed(stabilityRunnable, stabilityWindowMs)
@@ -292,13 +315,35 @@ class WebViewActivity : AppCompatActivity() {
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
+    override fun onDispose() {
         isClosing = true
         mainHandler.removeCallbacks(stabilityRunnable)
         mainHandler.removeCallbacks(bootWatchdogRunnable)
+        chromeClient?.resetFileChooser()
+        chromeClient = null
+        if (::webView.isInitialized) {
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            webView.destroy()
+        }
         if (instance === this) instance = null
-        BrowserPlugin.onFinish()
-        finish()
+    }
+}
+
+/**
+ * Container that moves focus to the WebView when a forwarded touch lands on
+ * it. Touch events arrive synthetically (dispatched by the activity's gesture
+ * handler, not the normal window traversal), so the framework's
+ * touch-mode focus handoff never runs — without this, page text inputs get
+ * caret and taps but no keyboard.
+ */
+private class TouchFocusLayout(
+    context: Context,
+    private val webView: () -> WebView?,
+) : FrameLayout(context) {
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            webView()?.let { if (!it.hasFocus()) it.requestFocus() }
+        }
+        return super.dispatchTouchEvent(ev)
     }
 }

@@ -13,10 +13,16 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
+import io.flutter.plugin.common.PluginRegistry
 
-
-/** BrowserPlugin */
-class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
+/**
+ * Control channel for the embedded webview ([WebViewNativeView]) plus the TWA
+ * fast-path. The webview itself is created by the host activity's native-view
+ * factory (flutter_native_view_android); `configure` stages the per-open
+ * config the factory has no argument channel for.
+ */
+class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
+    PluginRegistry.ActivityResultListener {
 
     companion object {
         const val CHANNEL = "inapp_webview_channel"
@@ -25,10 +31,6 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
         fun onNavigationCancel(url: String) {
             methodChannel?.invokeMethod("onNavigationCancel", url)
-        }
-
-        fun onFinish() {
-            methodChannel?.invokeMethod("onFinish", null)
         }
 
         fun onLoadError(code: Int, domain: String, message: String, category: String) {
@@ -53,6 +55,7 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     private var activity: Activity? = null
+    private var activityBinding: ActivityPluginBinding? = null
 
     private fun initPlugin(binaryMessenger: BinaryMessenger) {
         methodChannel = MethodChannel(binaryMessenger, CHANNEL)
@@ -72,6 +75,12 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
+        activityBinding = binding
+        // File-chooser results (WebViewChromeClient launches pickers with
+        // startActivityForResult) come back through the plugin binding — the
+        // host activity is a plain FlutterActivity, no ComponentActivity
+        // launcher registration involved.
+        binding.addActivityResultListener(this)
 
         flutterPluginBinding?.binaryMessenger?.let {
             // Reinitialize MethodChannel Forcefully from MainIsolate
@@ -80,46 +89,51 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
+        activityBinding?.removeActivityResultListener(this)
+        activityBinding = null
         activity = null
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
+        activityBinding = binding
+        binding.addActivityResultListener(this)
     }
 
     override fun onDetachedFromActivity() {
+        activityBinding?.removeActivityResultListener(this)
+        activityBinding = null
         activity = null
         methodChannel = null
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean =
+        WebViewNativeView.instance?.chromeClient?.onActivityResult(requestCode, resultCode, data)
+            ?: false
+
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
-            "open" -> {
+            "configure" -> {
                 val url = call.argument<String>("url")
-                val invalidUrlRegex = call.argument<List<String>>("invalidUrlRegex")?.toTypedArray()
-                val headers = call.argument<HashMap<String, String>>("headers")
-                val color = call.argument<Long>("color")
-
-                if (activity == null) {
-                    result.error("NO_ACTIVITY", "Activity is null", null)
-                    return
-                }
-
                 if (url == null) {
                     result.error("invalid_arguments", "url is null", null)
                     return
                 }
+                WebViewNativeView.pendingConfig = WebViewConfig(
+                    url = url,
+                    headers = call.argument<HashMap<String, String>>("headers"),
+                    invalidUrlRegex = call.argument<List<String>>("invalidUrlRegex"),
+                    // ARGB with a full alpha byte overflows Int32, so the
+                    // codec delivers it as a Long.
+                    color = (call.argument<Any>("color") as? Number)?.toInt(),
+                    bootProbeJs = call.argument<String>("bootProbeJs"),
+                    bootProbeUrl = call.argument<String>("bootProbeUrl"),
+                )
+                result.success(null)
+            }
 
-                val intent = Intent(activity, WebViewActivity::class.java).apply {
-                    putExtra("url", url)
-                    putExtra("color", color)
-                    putExtra("invalidUrlRegex", invalidUrlRegex)
-                    putExtra("headers", headers)
-                    putExtra("bootProbeJs", call.argument<String>("bootProbeJs"))
-                    putExtra("bootProbeUrl", call.argument<String>("bootProbeUrl"))
-                }
-
-                activity?.startActivityForResult(intent, 20)
+            "reload" -> {
+                WebViewNativeView.instance?.reloadWebView()
                 result.success(null)
             }
 
@@ -138,27 +152,6 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 )
             }
 
-            "openTurnstile" -> {
-                val html = call.argument<String>("html")
-
-                if (activity == null) {
-                    result.error("NO_ACTIVITY", "Activity is null", null)
-                    return
-                }
-
-                if (html == null) {
-                    result.error("invalid_arguments", "html is null", null)
-                    return
-                }
-
-                val intent = Intent(activity, TurnstileActivity::class.java).apply {
-                    putExtra("html", html)
-                }
-
-                activity?.startActivity(intent)
-                result.success(null)
-            }
-
             "isWebViewAvailable" -> {
                 result.success(try {
                     WebView(activity ?: result.run {
@@ -169,16 +162,6 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 } catch (e: Exception) {
                     false
                 })
-            }
-
-            "close" -> {
-                activity?.finishActivity(20)
-                result.success(null)
-            }
-
-            "reload" -> {
-                WebViewActivity.instance?.reloadWebView()
-                result.success(null)
             }
 
             else -> {

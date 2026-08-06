@@ -15,8 +15,6 @@ import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -25,33 +23,36 @@ import java.io.IOException
 
 
 internal class WebViewChromeClient(
-    private var activity: androidx.activity.ComponentActivity
+    private var activity: Activity
 ) : WebChromeClient() {
     private var videoOutputFileUri: Uri? = null
     private var imageOutputFileUri: Uri? = null
 
 
     private var pickerCallback: ValueCallback<Array<Uri>>? = null
-    private var resultLauncher: ActivityResultLauncher<Intent> =activity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+
+    // Chooser results are delivered by BrowserPlugin's ActivityResultListener
+    // (the host is a plain FlutterActivity — no ComponentActivity launcher
+    // registration, which also removes the register-while-RESUMED crash class
+    // the old launcher-based client had to work around).
+    fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != FILE_CHOOSER_REQUEST_CODE) return false
 
         if (pickerCallback != null) {
             var results: Array<Uri>? = null
-            if (result.resultCode == Activity.RESULT_OK) {
-                results = getSelectedFiles(result.data, result.resultCode)
+            if (resultCode == Activity.RESULT_OK) {
+                results = getSelectedFiles(data, resultCode)
             }
-
-            if (pickerCallback != null) {
-                pickerCallback!!.onReceiveValue(results)
-            }
+            pickerCallback!!.onReceiveValue(results)
         }
-
 
         pickerCallback = null
         imageOutputFileUri = null
         videoOutputFileUri = null
+        return true
     }
 
-    // The client is reused across WebView recreates (see WebViewActivity
+    // The client is reused across WebView recreates (see WebViewNativeView
     // chromeClient); a pending chooser belongs to the destroyed WebView, so
     // its callback must be resolved (WebKit requires exactly one
     // onReceiveValue) and the capture URIs dropped — otherwise the result
@@ -143,7 +144,7 @@ internal class WebViewChromeClient(
             )
         }
 
-        resultLauncher.launch(pickerIntent)
+        activity.startActivityForResult(pickerIntent, FILE_CHOOSER_REQUEST_CODE)
 
         return true
     }
@@ -388,5 +389,6 @@ internal class WebViewChromeClient(
     companion object {
         private const val LOG_TAG: String = "IABWebChromeClient"
         private const val REQUEST_CODE = 2
+        private const val FILE_CHOOSER_REQUEST_CODE = 21
     }
 }
