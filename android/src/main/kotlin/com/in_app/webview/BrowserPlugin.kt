@@ -137,6 +137,20 @@ class BrowserPlugin : FlutterPlugin, MethodCallHandler, ActivityAware,
                 result.success(null)
             }
 
+            "evaluateJavascript" -> {
+                val js = call.argument<String>("js")
+                if (js == null) {
+                    result.error("invalid_arguments", "js is null", null)
+                    return
+                }
+                val view = WebViewNativeView.instance
+                if (view == null) {
+                    result.success(null)
+                    return
+                }
+                view.evaluateJavascript(js) { result.success(it) }
+            }
+
             "openTWA" -> {
                 val intent = Intent(activity, LauncherActivity::class.java).apply {
                     data = call.argument<String>("url")?.toUri()

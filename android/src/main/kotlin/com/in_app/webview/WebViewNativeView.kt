@@ -126,6 +126,20 @@ class WebViewNativeView : NativeView() {
         }
     }
 
+    fun evaluateJavascript(js: String, onResult: (String?) -> Unit) {
+        mainHandler.post {
+            if (isClosing || !::webView.isInitialized) {
+                onResult(null)
+                return@post
+            }
+            // Results arrive JSON-encoded; unwrap the common string case so the
+            // Dart side sees what the script actually returned.
+            webView.evaluateJavascript(js) { raw ->
+                onResult(if (raw == null || raw == "null") null else raw.trim('"'))
+            }
+        }
+    }
+
     private fun checkUrl(url: String): Boolean {
         return invalidUrlPatternList?.let { it.any { p -> p.matcher(url).find() } } ?: false
     }

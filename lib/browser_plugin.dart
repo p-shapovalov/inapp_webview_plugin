@@ -65,6 +65,17 @@ class BrowserPlugin {
   /// transient load failure without restarting/closing the survey.
   Future reload() => _channel.invokeMethod('reload');
 
+  /// Evaluates [js] in the live page and returns its result as a string.
+  ///
+  /// The app→page direction of the bus. Page→app messaging stays deeplink
+  /// interception; this exists so the host can hand something to a page that
+  /// is already loaded, instead of navigating to say it.
+  ///
+  /// Returns null when there is no live webview (nothing embedded yet, or a
+  /// TWA owns the survey) or the script threw.
+  Future<String?> evaluateJavascript(String js) =>
+      _channel.invokeMethod<String>('evaluateJavascript', {'js': js});
+
   static Function(String)? onNavigationCancel;
   static Function(WebViewLoadError)? onLoadError;
 

@@ -447,6 +447,20 @@ class BrowserWebViewPlatformView: NSObject, FlutterPlatformView, WKNavigationDel
     // (e.g. an iOS 18.x provisional network failure) without tearing the survey
     // down. Reloads the current page, or re-loads the original URL if the
     // provisional load never committed.
+    func evaluate(_ js: String, completion: @escaping (String?) -> Void) {
+        guard !isClosing, let webView else {
+            completion(nil)
+            return
+        }
+        webView.evaluateJavaScript(js) { value, error in
+            guard error == nil, let value, !(value is NSNull) else {
+                completion(nil)
+                return
+            }
+            completion(value as? String ?? String(describing: value))
+        }
+    }
+
     func reload() {
         webView.isHidden = true
         if let current = webView.url, !current.absoluteString.isEmpty {
